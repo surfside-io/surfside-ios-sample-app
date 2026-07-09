@@ -148,9 +148,31 @@ struct ContentView: View {
             .padding()
             .background(Color.green.opacity(0.1))
             .cornerRadius(10)
+
+            // MARK: - Discrete Commerce Events (Event API)
+            VStack(spacing: 8) {
+                Text("Commerce Events (Event API)")
+                    .font(.headline)
+                    .foregroundColor(.primary)
+
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    ForEach(commerceEventSpecs) { spec in
+                        Button(spec.label) {
+                            trackCommerceEvent(spec.label, spec.make())
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.purple)
+                        .disabled(!isInitialized)
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+            .padding()
+            .background(Color.purple.opacity(0.1))
+            .cornerRadius(10)
         }
     }
-    
+
     private var logSection: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -530,12 +552,93 @@ struct ContentView: View {
         addLog("📡 This will create commerce action event with attached product context")
         
         surfsidePlugin.setCommerceAction(action: "detail")
-        
+
         addLog("✅ Commerce action event tracked with product context")
-        
+
         // Force flush events
         tracker.emitter?.flush()
         addLog("🚀 Events flushed to collector")
+    }
+
+    // MARK: - Discrete event test helpers
+
+    /// A labeled discrete commerce event to render as a button. `make` builds a fresh
+    /// event on each tap so entities are never shared between taps.
+    private struct CommerceEventSpec: Identifiable {
+        let label: String
+        let make: () -> Event
+        var id: String { label }
+    }
+
+    /// One entry per discrete commerce event, each carrying demo entities. This is the
+    /// full roster of `SurfsideCommerceEvent` subclasses so every event can be fired and
+    /// inspected on its own.
+    private var commerceEventSpecs: [CommerceEventSpec] {
+        [
+            CommerceEventSpec(label: "View (detail)") { SurfsideProductViewEvent(products: [demoProduct()]) },
+            CommerceEventSpec(label: "Add (add)") { SurfsideAddToCartEvent(products: [demoProduct()]) },
+            CommerceEventSpec(label: "Cart (cart)") { SurfsideCartViewEvent(products: [demoProduct()]) },
+            CommerceEventSpec(label: "Remove (remove)") { SurfsideRemoveFromCartEvent(products: [demoProduct()]) },
+            CommerceEventSpec(label: "Click (click)") { SurfsideProductClickEvent(products: [demoProduct()]) },
+            CommerceEventSpec(label: "Checkout (checkout)") { SurfsideCheckoutEvent(products: [demoProduct()], transaction: demoTransaction()) },
+            CommerceEventSpec(label: "Purchase (purchase)") { SurfsidePurchaseEvent(transaction: demoTransaction(), products: [demoProduct()]) },
+            CommerceEventSpec(label: "Refund (refund)") { SurfsideRefundEvent(transaction: demoTransaction(), products: [demoProduct()]) },
+            CommerceEventSpec(label: "Promo Click (promo_click)") { SurfsidePromotionClickEvent(promotions: [demoPromotion()]) },
+            CommerceEventSpec(label: "Promo View (promotion_view)") { SurfsidePromotionViewEvent(promotions: [demoPromotion()]) },
+            CommerceEventSpec(label: "Impression (impression)") { SurfsideImpressionEvent(impressions: [demoImpression()]) },
+        ]
+    }
+
+    /// Tracks a single discrete commerce event and flushes, logging the outcome.
+    private func trackCommerceEvent(_ label: String, _ event: Event) {
+        beginLogBlock()
+        guard let tracker = tracker else {
+            addLog("❌ Error: Tracker not initialized")
+            return
+        }
+        addLog("🧩 [Event API] \(label)...")
+        _ = tracker.track(event)
+        tracker.emitter?.flush()
+        addLog("✅ \(label) tracked + flushed (schema: \(CommerceActionEntity.schema))")
+    }
+
+    // MARK: - Demo entities for the discrete event buttons
+
+    private func demoProduct() -> CommerceProductEntity {
+        CommerceProductEntity(
+            id: "evt-product-1",
+            name: "Event Demo Product",
+            brand: "Demo Brand",
+            category: "Electronics",
+            price: 19.99,
+            quantity: 1,
+            currency: "USD"
+        )
+    }
+
+    private func demoTransaction() -> CommerceTransactionEntity {
+        CommerceTransactionEntity(id: "evt-order-1", revenue: "39.98", currency: "USD")
+    }
+
+    private func demoPromotion() -> CommercePromotionEntity {
+        CommercePromotionEntity(
+            id: "evt-promo-1",
+            name: "Event Demo Promo",
+            creative: "banner",
+            position: "home_top",
+            currency: "USD"
+        )
+    }
+
+    private func demoImpression() -> CommerceImpressionEntity {
+        CommerceImpressionEntity(
+            id: "evt-impr-1",
+            name: "Event Demo Impression",
+            list: "search-results",
+            position: 1,
+            price: "19.99",
+            currency: "USD"
+        )
     }
 }
 
