@@ -3,10 +3,14 @@ import SurfsideTracker
 
 @available(iOS 14.0, macOS 11.0, *)
 struct ContentView: View {
-    @State private var tracker: (any TrackerController)? = nil
-    @State private var surfsideEvent: SurfsideEvent? = nil
     @State private var logBlocks: [[String]] = []
     @State private var isInitialized = false
+
+    // The tracker and its Surfside plugin, created in `initializeTracker()`.
+    // We hold the plugin instance and call commerce/context methods on it directly
+    // (e.g. `surfsidePlugin?.addProduct(...)`) — the standard Snowplow plugin usage.
+    @State private var tracker: TrackerController?
+    @State private var surfsidePlugin: SurfsidePlugin?
     
     var body: some View {
         VStack(spacing: 20) {
@@ -124,10 +128,19 @@ struct ContentView: View {
                         .buttonStyle(.bordered)
                         .disabled(!isInitialized)
                         
-                        Button("Purchase Product") {
+                        Button("Purchase (Stateful API)") {
                             trackPurchase()
                         }
                         .buttonStyle(.bordered)
+                        .disabled(!isInitialized)
+                    }
+
+                    HStack(spacing: 12) {
+                        Button("Purchase (Event API)") {
+                            trackPurchaseEventAPI()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.purple)
                         .disabled(!isInitialized)
                     }
                 }
@@ -213,7 +226,7 @@ struct ContentView: View {
         beginLogBlock()
         addLog("Starting tracker initialization...")
         
-        // Use SurfsideHelper to create a tracker with the Surfside plugin
+        // Create a tracker with the Surfside plugin
         let namespace = "iosTracker"
         let endpoint = "https://c-dev.surfside.io"
         let accountId = "00000-1"
@@ -223,42 +236,42 @@ struct ContentView: View {
         addLog("Endpoint: \(endpoint)")
         addLog("Account ID: \(accountId), Source ID: \(sourceId)")
         
-        // Create the tracker and plugin with SurfsideHelper
-        // This will also register the tracker and fire the source event
+        // Create the tracker and plugin via the Surfside entry point.
+        // This builds the tracker (which self-registers in Snowplow's native registry)
+        // and fires the source event automatically.
         addLog("🔧 Creating tracker with POST method...")
-        let result = SurfsideHelper.createTracker(
+        let result = Surfside.createTracker(
             namespace: namespace,
             environment: .development,
             accountId: accountId,
             sourceId: sourceId
         )
-        
+
         // Add debugging for network configuration
         addLog("🌐 Network endpoint configured: \(endpoint)")
         addLog("📤 HTTP method: POST")
-        
+
         // Store references for later use
         self.tracker = result.tracker
-        self.surfsideEvent = result.plugin
+        self.surfsidePlugin = result.plugin
         self.isInitialized = true
-        
+
         addLog("✅ Tracker initialized successfully!")
-        addLog("📡 Source event fired automatically by SurfsideHelper with accountId: \(accountId), sourceId: \(sourceId)")
-        
+        addLog("📡 Source event fired automatically by Surfside.createTracker with accountId: \(accountId), sourceId: \(sourceId)")
+
+        let locationId = "san-fran-02"
+        let latitude = "37.7749"
+        let longitude = "-122.4194"
+        let countryCode = "US"
+        let state = "CA"
+        let city = "San Francisco"
+
         // Set location context after source
-        surfsideEvent?.setLocation(
-            latitude: "37.7749",
-            longitude: "-122.4194",
-            country_code: "US",
-            state: "CA",
-            city: "San Francisco",
-            trackerNamespaces: nil
-        )
+        result.plugin.setLocation(id: locationId, latitude: latitude, longitude: longitude, countryCode: countryCode, state: state, city: city)
         addLog("📍 Location set: San Francisco (37.7749, -122.4194)")
         
         // Force flush any pending events
         addLog("🚀 Flushing any pending events...")
-        tracker?.emitter?.flush()
         addLog("✅ Initialization complete - tracker ready for events")
     }
 
@@ -268,12 +281,13 @@ struct ContentView: View {
             addLog("❌ Error: Tracker not initialized")
             return
         }
-        
+
         addLog("🔥 Tracking basic screen viewed event...")
-        
+
+        // ScreenView is a plain Snowplow event — track it directly on the tracker.
         _ = tracker.track(ScreenView(name: "Home"))
         tracker.emitter?.flush()
-        
+
         addLog("✅ Basic event tracked and flushed")
     }
     
@@ -328,18 +342,18 @@ struct ContentView: View {
     
     func updateLocation() {
         beginLogBlock()
-        guard let surfsideEvent = surfsideEvent else {
-            addLog("❌ Error: SurfsideEvent not initialized")
+        guard let surfsidePlugin = surfsidePlugin else {
+            addLog("❌ Error: Surfside plugin not initialized")
             return
         }
         
         addLog("📍 Updating location context...")
         
         // Update location with new coordinates (example: New York)
-        surfsideEvent.setLocation(
+        surfsidePlugin.setLocation(
             latitude: "40.7128",
             longitude: "-74.0060",
-            country_code: "US",
+            countryCode: "US",
             state: "NY",
             city: "New York",
             trackerNamespaces: nil
@@ -354,15 +368,15 @@ struct ContentView: View {
     
     func updateSource() {
         beginLogBlock()
-        guard let surfsideEvent = surfsideEvent else {
-            addLog("❌ Error: SurfsideEvent not initialized")
+        guard let surfsidePlugin = surfsidePlugin else {
+            addLog("❌ Error: Surfside plugin not initialized")
             return
         }
         
         addLog("📡 Updating source context...")
         
         // Update source with new account and source IDs
-        surfsideEvent.source(
+        surfsidePlugin.source(
             accountId: "updated-account-123",
             sourceId: "updated-source-456",
             trackerNamespaces: nil
@@ -377,15 +391,15 @@ struct ContentView: View {
     
     func updateSegment() {
         beginLogBlock()
-        guard let surfsideEvent = surfsideEvent else {
-            addLog("❌ Error: SurfsideEvent not initialized")
+        guard let surfsidePlugin = surfsidePlugin else {
+            addLog("❌ Error: Surfside plugin not initialized")
             return
         }
         
         addLog("🎯 Updating segment context...")
         
         // Update segment with new segment data
-        surfsideEvent.segment(
+        surfsidePlugin.segment(
             segmentId: "premium-users",
             segmentVal: "1",
             trackerNamespaces: nil
@@ -400,16 +414,16 @@ struct ContentView: View {
     
     func trackPurchase() {
         beginLogBlock()
-        guard let surfsideEvent = surfsideEvent else {
-            addLog("❌ Error: SurfsideEvent not initialized")
+        guard let surfsidePlugin = surfsidePlugin else {
+            addLog("❌ Error: Surfside plugin not initialized")
             return
         }
         
         addLog("🛒 Tracking purchase event...")
         
         // Add purchase product
-        surfsideEvent.addProduct(
-            id: "demo-product-123",
+        surfsidePlugin.addProduct(
+            id: "demo-product-123-plugin",
             name: "Sample Product",
             list: "featured-products",
             brand: "Demo Brand",
@@ -425,28 +439,76 @@ struct ContentView: View {
         
         addLog("➕ Added purchase product: Sample Product ($29.99 x1)")
         
+        surfsidePlugin.addTransaction(
+            id: "james-order-plugin",
+            revenue: 100
+//            currency: "USD"
+        )
+        
         // Set commerce action to purchase
-        surfsideEvent.setCommerceAction(action: "purchase")
+        surfsidePlugin.setCommerceAction(action: "purchase")
         addLog("🛒 Purchase event fired for demo-product-123 ($29.99)")
         
         // Force flush events
         tracker?.emitter?.flush()
         addLog("🚀 Purchase events flushed to collector")
     }
-    
+
+    /// Event-API counterpart to `trackPurchase()`.
+    ///
+    /// Same wire payload (a commerce-action event carrying product + transaction
+    /// entities), but built as one explicit `SurfsidePurchaseEvent` instead of the
+    /// stateful addProduct → addTransaction → setCommerceAction sequence. Uses distinct
+    /// IDs and totals from the stateful button so both can be queried separately in the
+    /// collector.
+    func trackPurchaseEventAPI() {
+        beginLogBlock()
+        guard let tracker = tracker else {
+            addLog("❌ Error: Tracker not initialized")
+            return
+        }
+
+        addLog("🧩 Tracking purchase via EVENT API (SurfsidePurchaseEvent)...")
+
+        // Build the entities explicitly as values — no accumulator, no setCommerceAction.
+        let product = CommerceProductEntity(
+            id: "event-product-777-event",
+            name: "Event API Product",
+            list: "event-api-products",
+            brand: "Event Brand",
+            category: "Electronics",
+            variant: "Green",
+            price: 49.99,
+            quantity: 2,
+            coupon: "EVENT20",
+            position: 1,
+            currency: "USD"
+        )
+
+        let transaction = CommerceTransactionEntity(
+            id: "james-order-event",
+            revenue: "250",
+            currency: "USD"
+        )
+
+        let event = SurfsidePurchaseEvent(transaction: transaction, products: [product])
+        _ = tracker.track(event)
+        tracker.emitter?.flush()
+
+        addLog("➕ Product: Event API Product ($49.99 x2), id event-product-777")
+        addLog("💳 Transaction james-order-event, revenue $250")
+        addLog("🧩 SurfsidePurchaseEvent tracked + flushed (schema: \(CommerceActionEntity.schema))")
+    }
+
     func viewProduct() {
         beginLogBlock()
-        guard let tracker = tracker, let surfsideEvent = self.surfsideEvent else {
-            addLog("❌ Error: Tracker or SurfsideEvent not initialized")
+        guard let tracker = tracker, let surfsidePlugin = self.surfsidePlugin else {
+            addLog("❌ Error: Tracker or Surfside plugin not initialized")
             return
         }
         
         addLog("🛍️ Starting commerce product view flow...")
-        
-        // Force register the tracker with SurfsideController
-        surfsideEvent.registerTracker(tracker)
-        addLog("🔗 Tracker registered with SurfsideController")
-        
+
         // Add product to the commerce context FIRST
         addLog("📦 Adding product context:")
         addLog("  - ID: P12345")
@@ -454,8 +516,8 @@ struct ContentView: View {
         addLog("  - Price: $29.99")
         addLog("  - Quantity: 2")
 
-        surfsideEvent.addProduct(
-            id: "P12345",
+        surfsidePlugin.addProduct(
+            id: "P12345-James",
             name: "Premium Product",
             price: 29.99,
             quantity: 2
@@ -467,7 +529,7 @@ struct ContentView: View {
         addLog("🔍 Setting commerce action: 'detail'")
         addLog("📡 This will create commerce action event with attached product context")
         
-        surfsideEvent.setCommerceAction(action: "detail")
+        surfsidePlugin.setCommerceAction(action: "detail")
         
         addLog("✅ Commerce action event tracked with product context")
         
