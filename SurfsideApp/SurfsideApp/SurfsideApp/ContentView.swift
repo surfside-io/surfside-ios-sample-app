@@ -6,6 +6,11 @@ struct ContentView: View {
     @State private var logBlocks: [[String]] = []
     @State private var isInitialized = false
 
+    // The source ID currently in use. It lives in @State (not as a local in
+    // initializeTracker) so the view can read it and re-render whenever it changes
+    // — e.g. after "Update Source" swaps it out.
+    @State private var sourceId = "00000-9-james"
+
     // The tracker and its Surfside plugin, created in `initializeTracker()`.
     // We hold the plugin instance and call commerce/context methods on it directly
     // (e.g. `surfsidePlugin?.addProduct(...)`) — the standard Snowplow plugin usage.
@@ -13,11 +18,18 @@ struct ContentView: View {
     @State private var surfsidePlugin: SurfsidePlugin?
     
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             headerView
             statusView
-            buttonSection
+            // Buttons scroll in the upper region so the two full commerce grids
+            // don't push the log off-screen…
+            ScrollView {
+                buttonSection
+            }
+            // …and the log box stays pinned at the bottom with a fixed height so
+            // output is always visible while firing events.
             logSection
+                .frame(height: 260)
         }
         .padding()
     }
@@ -38,139 +50,152 @@ struct ContentView: View {
         }
     }
     
+    // Two equal columns, shared by both commerce grids.
+    private let commerceGridColumns = [GridItem(.flexible()), GridItem(.flexible())]
+
     private var buttonSection: some View {
         VStack(spacing: 20) {
-            // MARK: - Initialize, Debug, Clear Section
+            initializeDebugSection
+            setContextsSection
+            fireEventsSection
+            commerceEventAPISection
+            commerceStatefulSection
+        }
+    }
+
+    // MARK: - Button sections
+    // Each section is a `sectionCard` (titled, tinted, rounded box). Split into
+    // separate computed properties both for readability and to keep each view body
+    // small enough for SwiftUI's type-checker.
+
+    private var initializeDebugSection: some View {
+        sectionCard("Initialize, Debug, Clear", tint: .gray) {
             VStack(spacing: 8) {
-                Text("Initialize, Debug, Clear")
-                    .font(.headline)
-                    .foregroundColor(.primary)
-                
                 HStack(spacing: 12) {
-                    Button("Initialize Tracker") {
-                        initializeTracker()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isInitialized)
-                    
-                    Button("Debug Event Flow") {
-                        debugEventFlow()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!isInitialized)
-                    
-                    Button("Clear Logs") {
-                        logBlocks.removeAll()
-                    }
-                    .buttonStyle(.borderless)
+                    Button("Initialize Tracker") { initializeTracker() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isInitialized)
+
+                    Button("Debug Event Flow") { debugEventFlow() }
+                        .buttonStyle(.bordered)
+                        .disabled(!isInitialized)
+
+                    Button("Clear Logs") { logBlocks.removeAll() }
+                        .buttonStyle(.borderless)
+                        .foregroundColor(.secondary)
+                }
+
+                // Reads the @State `sourceId`. Because it's @State, any change to it
+                // (e.g. in updateSource) re-runs body and this label updates itself.
+                Text("Source ID: \(sourceId)")
+                    .font(.caption)
                     .foregroundColor(.secondary)
-                }
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding()
-            .background(Color.gray.opacity(0.1))
-            .cornerRadius(10)
-            
-            // MARK: - Set Contexts Section
+        }
+    }
+
+    private var setContextsSection: some View {
+        sectionCard("Set Contexts", tint: .blue) {
+            HStack(spacing: 12) {
+                Button("Update Location") { updateLocation() }
+                    .buttonStyle(.bordered)
+                    .disabled(!isInitialized)
+
+                Button("Update Source") { updateSource() }
+                    .buttonStyle(.bordered)
+                    .disabled(!isInitialized)
+
+                Button("Update Segment") { updateSegment() }
+                    .buttonStyle(.bordered)
+                    .disabled(!isInitialized)
+            }
+        }
+    }
+
+    private var fireEventsSection: some View {
+        sectionCard("Fire Events", tint: .green) {
             VStack(spacing: 8) {
-                Text("Set Contexts")
-                    .font(.headline)
-                    .foregroundColor(.primary)
-                
                 HStack(spacing: 12) {
-                    Button("Update Location") {
-                        updateLocation()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!isInitialized)
-                    
-                    Button("Update Source") {
-                        updateSource()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!isInitialized)
-                    
-                    Button("Update Segment") {
-                        updateSegment()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!isInitialized)
-                }
-            }
-            .padding()
-            .background(Color.blue.opacity(0.1))
-            .cornerRadius(10)
-            
-            // MARK: - Fire Events Section
-            VStack(spacing: 8) {
-                Text("Fire Events")
-                    .font(.headline)
-                    .foregroundColor(.primary)
-                
-                VStack(spacing: 8) {
-                    HStack(spacing: 12) {
-                        Button("Track Screen View") {
-                            trackScreenView()
-                        }
+                    Button("Track Screen View") { trackScreenView() }
                         .buttonStyle(.borderedProminent)
                         .disabled(!isInitialized)
-                        
-                        Button("Track Basic Event") {
-                            trackEvent()
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(!isInitialized)
-                    }
-                    
-                    HStack(spacing: 12) {
-                        Button("View Product (Commerce)") {
-                            viewProduct()
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(!isInitialized)
-                        
-                        Button("Purchase (Stateful API)") {
-                            trackPurchase()
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(!isInitialized)
-                    }
 
-                    HStack(spacing: 12) {
-                        Button("Purchase (Event API)") {
-                            trackPurchaseEventAPI()
-                        }
+                    Button("Track Basic Event") { trackEvent() }
+                        .buttonStyle(.bordered)
+                        .disabled(!isInitialized)
+                }
+
+                HStack(spacing: 12) {
+                    Button("View Product (Commerce)") { viewProduct() }
+                        .buttonStyle(.bordered)
+                        .disabled(!isInitialized)
+
+                    Button("Purchase (Stateful API)") { trackPurchase() }
+                        .buttonStyle(.bordered)
+                        .disabled(!isInitialized)
+                }
+
+                HStack(spacing: 12) {
+                    Button("Purchase (Event API)") { trackPurchaseEventAPI() }
                         .buttonStyle(.borderedProminent)
                         .tint(.purple)
                         .disabled(!isInitialized)
-                    }
                 }
             }
-            .padding()
-            .background(Color.green.opacity(0.1))
-            .cornerRadius(10)
+        }
+    }
 
-            // MARK: - Discrete Commerce Events (Event API)
-            VStack(spacing: 8) {
-                Text("Commerce Events (Event API)")
-                    .font(.headline)
-                    .foregroundColor(.primary)
-
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    ForEach(commerceEventSpecs) { spec in
-                        Button(spec.label) {
-                            trackCommerceEvent(spec.label, spec.make())
-                        }
+    private var commerceEventAPISection: some View {
+        sectionCard("Commerce Events (Event API)", tint: .purple) {
+            LazyVGrid(columns: commerceGridColumns, spacing: 8) {
+                ForEach(commerceEventSpecs) { spec in
+                    Button(spec.label) { trackCommerceEvent(spec.label, spec.make()) }
                         .buttonStyle(.bordered)
                         .tint(.purple)
                         .disabled(!isInitialized)
                         .frame(maxWidth: .infinity)
-                    }
                 }
             }
-            .padding()
-            .background(Color.purple.opacity(0.1))
-            .cornerRadius(10)
         }
+    }
+
+    // Same action roster and grid layout as the Event API section above, but each
+    // button fires via the stateful plugin sequence (addProduct/addTransaction/
+    // addPromotion/addImpression + setCommerceAction) instead of a single event.
+    // Distinct "stf-" entity IDs so stateful vs event-API rows are separable in the DB.
+    private var commerceStatefulSection: some View {
+        sectionCard("Commerce Events (Stateful API)", tint: .blue) {
+            LazyVGrid(columns: commerceGridColumns, spacing: 8) {
+                ForEach(statefulEventSpecs) { spec in
+                    Button(spec.label) { trackStatefulEvent(spec.label, spec) }
+                        .buttonStyle(.bordered)
+                        .tint(.blue)
+                        .disabled(!isInitialized)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
+    /// A titled, tinted, rounded container — the shared chrome for every button section.
+    /// `@ViewBuilder` on the `content` closure lets callers pass normal view syntax
+    /// (multiple subviews, `if`, etc.) exactly as they would inside a `VStack`.
+    @ViewBuilder
+    private func sectionCard<Content: View>(
+        _ title: String,
+        tint: Color,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(spacing: 8) {
+            Text(title)
+                .font(.headline)
+                .foregroundColor(.primary)
+            content()
+        }
+        .padding()
+        .background(tint.opacity(0.1))
+        .cornerRadius(10)
     }
 
     private var logSection: some View {
@@ -252,8 +277,8 @@ struct ContentView: View {
         let namespace = "iosTracker"
         let endpoint = "https://c-dev.surfside.io"
         let accountId = "00000-1"
-        let sourceId = "00000-2"
-        
+        // sourceId now comes from @State (declared at the top), so no local here.
+
         addLog("Creating tracker with namespace: \(namespace)")
         addLog("Endpoint: \(endpoint)")
         addLog("Account ID: \(accountId), Source ID: \(sourceId)")
@@ -264,7 +289,7 @@ struct ContentView: View {
         addLog("🔧 Creating tracker with POST method...")
         let result = Surfside.createTracker(
             namespace: namespace,
-            environment: .development,
+            environment: .production,
             accountId: accountId,
             sourceId: sourceId
         )
@@ -398,13 +423,18 @@ struct ContentView: View {
         addLog("📡 Updating source context...")
         
         // Update source with new account and source IDs
+        let newSourceId = "updated-source-456"
         surfsidePlugin.source(
             accountId: "updated-account-123",
-            sourceId: "updated-source-456",
+            sourceId: newSourceId,
             trackerNamespaces: nil
         )
-        
-        addLog("✅ Source updated: accountId=updated-account-123, sourceId=updated-source-456")
+
+        // Keep our @State in sync so the on-screen "Source ID" reflects reality.
+        // Assigning to a @State var is what triggers SwiftUI to re-render body.
+        sourceId = newSourceId
+
+        addLog("✅ Source updated: accountId=updated-account-123, sourceId=\(newSourceId)")
         
         // Force flush to send the source update
         tracker?.emitter?.flush()
@@ -575,14 +605,14 @@ struct ContentView: View {
     /// inspected on its own.
     private var commerceEventSpecs: [CommerceEventSpec] {
         [
-            CommerceEventSpec(label: "View (detail)") { SurfsideProductViewEvent(products: [demoProduct()]) },
-            CommerceEventSpec(label: "Add (add)") { SurfsideAddToCartEvent(products: [demoProduct()]) },
-            CommerceEventSpec(label: "Cart (cart)") { SurfsideCartViewEvent(products: [demoProduct()]) },
-            CommerceEventSpec(label: "Remove (remove)") { SurfsideRemoveFromCartEvent(products: [demoProduct()]) },
-            CommerceEventSpec(label: "Click (click)") { SurfsideProductClickEvent(products: [demoProduct()]) },
-            CommerceEventSpec(label: "Checkout (checkout)") { SurfsideCheckoutEvent(products: [demoProduct()], transaction: demoTransaction()) },
-            CommerceEventSpec(label: "Purchase (purchase)") { SurfsidePurchaseEvent(transaction: demoTransaction(), products: [demoProduct()]) },
-            CommerceEventSpec(label: "Refund (refund)") { SurfsideRefundEvent(transaction: demoTransaction(), products: [demoProduct()]) },
+            CommerceEventSpec(label: "View (detail)") { SurfsideProductViewEvent(products: [demoProduct(event: "detail")]) },
+            CommerceEventSpec(label: "Add (add)") { SurfsideAddToCartEvent(products: [demoProduct(event: "add")]) },
+            CommerceEventSpec(label: "Cart (cart)") { SurfsideCartViewEvent(products: [demoProduct(event: "cart")]) },
+            CommerceEventSpec(label: "Remove (remove)") { SurfsideRemoveFromCartEvent(products: [demoProduct(event: "remove")]) },
+            CommerceEventSpec(label: "Click (click)") { SurfsideProductClickEvent(products: [demoProduct(event: "click")]) },
+            CommerceEventSpec(label: "Checkout (checkout)") { SurfsideCheckoutEvent(products: [demoProduct(event: "checkout")], transaction: demoTransaction()) },
+            CommerceEventSpec(label: "Purchase (purchase)") { SurfsidePurchaseEvent(transaction: demoTransaction(), products: [demoProduct(event: "purchase")]) },
+            CommerceEventSpec(label: "Refund (refund)") { SurfsideRefundEvent(transaction: demoTransaction(), products: [demoProduct(event: "refund")]) },
             CommerceEventSpec(label: "Promo Click (promo_click)") { SurfsidePromotionClickEvent(promotions: [demoPromotion()]) },
             CommerceEventSpec(label: "Promo View (promotion_view)") { SurfsidePromotionViewEvent(promotions: [demoPromotion()]) },
             CommerceEventSpec(label: "Impression (impression)") { SurfsideImpressionEvent(impressions: [demoImpression()]) },
@@ -602,12 +632,98 @@ struct ContentView: View {
         addLog("✅ \(label) tracked + flushed (schema: \(CommerceActionEntity.schema))")
     }
 
+    // MARK: - Stateful API test helpers
+
+    /// A labeled stateful commerce action. `fire` runs the plugin sequence
+    /// (add* contexts + setCommerceAction) on each tap; setCommerceAction flushes
+    /// and clears the accumulated commerce contexts itself.
+    private struct StatefulEventSpec: Identifiable {
+        let label: String
+        let fire: (SurfsidePlugin) -> Void
+        var id: String { label }
+    }
+
+    /// The same action roster as `commerceEventSpecs`, one entry per label, but each
+    /// assembled the stateful way. Product actions add a product; checkout/purchase/refund
+    /// add a transaction too; promo actions add a promotion; impression adds an impression.
+    private var statefulEventSpecs: [StatefulEventSpec] {
+        [
+            StatefulEventSpec(label: "View (detail)") { p in addDemoProduct(p); p.setCommerceAction(action: "detail") },
+            StatefulEventSpec(label: "Add (add)") { p in addDemoProduct(p); p.setCommerceAction(action: "add") },
+            StatefulEventSpec(label: "Cart (cart)") { p in addDemoProduct(p); p.setCommerceAction(action: "cart") },
+            StatefulEventSpec(label: "Remove (remove)") { p in addDemoProduct(p); p.setCommerceAction(action: "remove") },
+            StatefulEventSpec(label: "Click (click)") { p in addDemoProduct(p); p.setCommerceAction(action: "click") },
+            StatefulEventSpec(label: "Checkout (checkout)") { p in addDemoProduct(p); addDemoTransaction(p); p.setCommerceAction(action: "checkout") },
+            StatefulEventSpec(label: "Purchase (purchase)") { p in addDemoProduct(p); addDemoTransaction(p); p.setCommerceAction(action: "purchase") },
+            StatefulEventSpec(label: "Refund (refund)") { p in addDemoProduct(p); addDemoTransaction(p); p.setCommerceAction(action: "refund") },
+            StatefulEventSpec(label: "Promo Click (promo_click)") { p in addDemoPromotion(p); p.setCommerceAction(action: "promo_click") },
+            StatefulEventSpec(label: "Promo View (promotion_view)") { p in addDemoPromotion(p); p.setCommerceAction(action: "promotion_view") },
+            StatefulEventSpec(label: "Impression (impression)") { p in addDemoImpression(p); p.setCommerceAction(action: "impression") },
+        ]
+    }
+
+    /// Runs a single stateful commerce action, logging the outcome. Mirrors
+    /// `trackCommerceEvent` so both sections read identically in the log.
+    private func trackStatefulEvent(_ label: String, _ spec: StatefulEventSpec) {
+        beginLogBlock()
+        guard let surfsidePlugin = surfsidePlugin else {
+            addLog("❌ Error: Surfside plugin not initialized")
+            return
+        }
+        addLog("🔁 [Stateful API] \(label)...")
+        spec.fire(surfsidePlugin)
+        addLog("✅ \(label) tracked + flushed (schema: \(CommerceActionEntity.schema))")
+    }
+
+    // MARK: - Demo commerce contexts for the stateful buttons
+    // Distinct "stf-" IDs (vs the event API's "evt-") so the two paths are separable
+    // in the collector while carrying the same shape of data.
+    
+    
+
+    private func addDemoProduct(_ p: SurfsidePlugin) {
+        p.addProduct(
+            id: "stf-product-1",
+            name: "Stateful Demo Product",
+            brand: "Demo Brand",
+            category: "Electronics",
+            price: 19.99,
+            quantity: 1,
+            currency: "USD"
+        )
+    }
+
+    private func addDemoTransaction(_ p: SurfsidePlugin) {
+        p.addTransaction(id: "stf-order-1", revenue: 39.98, currency: "USD")
+    }
+
+    private func addDemoPromotion(_ p: SurfsidePlugin) {
+        p.addPromotion(
+            id: "stf-promo-1",
+            name: "Stateful Demo Promo",
+            creative: "banner",
+            position: "home_top",
+            currency: "USD"
+        )
+    }
+
+    private func addDemoImpression(_ p: SurfsidePlugin) {
+        p.addImpression(
+            id: "stf-impr-1",
+            name: "Stateful Demo Impression",
+            list: "search-results",
+            position: 1,
+            price: 19.99,
+            currency: "USD"
+        )
+    }
+
     // MARK: - Demo entities for the discrete event buttons
 
-    private func demoProduct() -> CommerceProductEntity {
+    private func demoProduct(event: String) -> CommerceProductEntity {
         CommerceProductEntity(
-            id: "evt-product-1",
-            name: "Event Demo Product",
+            id: "evt-product-1-" + event,
+            name: "Event Demo Product-" + event,
             brand: "Demo Brand",
             category: "Electronics",
             price: 19.99,
