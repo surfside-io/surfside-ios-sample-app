@@ -7,7 +7,15 @@ struct ContentView: View {
     @State private var surfsideEvent: SurfsideEvent? = nil
     @State private var logMessages: [String] = []
     @State private var isInitialized = false
-    
+
+    // The source ID currently in use. It lives in @State (not as a local in
+    // initializeTracker) so the view can read it and re-render whenever it changes
+    // — e.g. after "Update Source" swaps it out.
+    @State private var sourceId = "00000-9-james"
+
+    // The tracker and its Surfside plugin, created in `initializeTracker()`.
+    // We hold the plugin instance and call commerce/context methods on it directly
+    // (e.g. `surfsidePlugin?.addProduct(...)`) — the standard Snowplow plugin usage.
     var body: some View {
         VStack(spacing: 20) {
             headerView

@@ -47,6 +47,33 @@ struct SurfsideAdsView: View {
         }
     }
     
+    
+    /*
+     <div class="ad-container">
+         <div class="ad-title">Surf Banner @ 2:1</div>
+         <surf-banner
+             channel-id="00000"
+             account-id="00000"
+             site-id="00000"
+             placement-id="00000"
+             location-id="james-location"
+             zone="myzone3"
+             width="2"
+             height="1">
+         </surf-banner>
+         <div class="ad-title">Surf Banner @ 4:1</div>
+         <surf-banner
+             channel-id="00000"
+             account-id="00000"
+             site-id="00000"
+             placement-id="00000"
+             location-id="james-location"
+             zone="myzone3"
+             width="4"
+             height="1">
+         </surf-banner>
+     */
+    
     private func loadSurfsideAd() {
         let htmlContent = """
         <!DOCTYPE html>
@@ -57,56 +84,17 @@ struct SurfsideAdsView: View {
             <title>Surfside Ads</title>
            
         </head>
-        <body>
-            <div class="ad-container">
-                <div class="ad-title">Surf Banner @ 4:1</div>
+        <body>            
+            
+                <div class="ad-title">Surf Banner @ 8:1</div>
                 <surf-banner 
                     channel-id="00000" 
                     account-id="00000" 
                     site-id="00000" 
                     placement-id="00000"
-                    location-id="UNIQUE_STORE_ID_HERE"
-                    zone="myzone"
-                    width="4" 
-                    height="1">
-                </surf-banner>
-            </div>
-            
-            <div class="ad-container">
-                <div class="ad-title">Live Banner [Argonaut] @ 8:1</div>
-                <surf-banner 
-                    channel-id="482cf" 
-                    account-id="6f05b" 
-                    site-id="0f88f" 
-                    placement-id="39225"
-                    location-id="91067"
-                    zone="myzone2"
-                    width="8" 
-                    height="1">
-                </surf-banner>
-                <div class="ad-title">Surf Banner @ 8:1</div>
-                <surf-banner 
-                    channel-id="482cf" 
-                    account-id="94907" 
-                    site-id="a63ef" 
-                    placement-id="39226"
-                    location-id="91067"
+                    location-id="james-location"
                     zone="myzone3"
                     width="8" 
-                    height="1">
-                </surf-banner>
-            </div>
-            
-            <div class="ad-container">
-                <div class="ad-title">Surf Banner @ 2:1</div>
-                <surf-banner 
-                    channel-id="00002" 
-                    account-id="00000" 
-                    site-id="00000" 
-                    placement-id="00002"
-                    location-id="UNIQUE_STORE_ID_HERE"
-                    zone="myzone3"
-                    width="2" 
                     height="1">
                 </surf-banner>
             </div>
@@ -116,7 +104,23 @@ struct SurfsideAdsView: View {
         </html>
         """
         
-        webView.loadHTMLString(htmlContent, baseURL: URL(string: "https://internalhost.com"))
+        // Set a dummy cookie before loading the page. WKWebView keeps its own
+        // cookie jar (WKHTTPCookieStore) separate from HTTPCookieStorage.shared,
+        // so the cookie must be written there. The domain must match the
+        // baseURL's host for the page (and document.cookie) to see it.
+        let dummyCookie = HTTPCookie(properties: [
+            .name: "surf_dummy",
+            .value: "hello-from-native-42",
+            .domain: "internalhost.com",
+            .path: "/",
+            .expires: Date().addingTimeInterval(60 * 60 * 24) // 1 day
+        ])!
+
+        // setCookie is asynchronous — load the HTML in its completion so the
+        // cookie is guaranteed to be in place before the page's scripts run.
+        webView.configuration.websiteDataStore.httpCookieStore.setCookie(dummyCookie) {
+            webView.loadHTMLString(htmlContent, baseURL: URL(string: "https://internalhost.com?surf_debug=true"))
+        }
     }
 }
 
@@ -126,6 +130,117 @@ struct WebViewRepresentable: UIViewRepresentable {
     
     func makeUIView(context: Context) -> WKWebView {
         webView.navigationDelegate = context.coordinator
+
+        // Allow attaching Safari's Web Inspector (Develop menu) to this webview.
+        // Gives the full Network tab, including <img>/pixel loads the JS bridge
+        // below can't see. iOS 16.4+ requires opting in explicitly.
+        if #available(iOS 16.4, *) {
+            webView.isInspectable = true
+        }
+
+        // Bridge the webview's JavaScript console to the Xcode console.
+        // 1) Register the coordinator as the receiver for messages named "consoleLog".
+        // 2) Inject JS (at document start, before the page's own scripts run) that
+        //    wraps console.log/warn/error/info/debug so each call also forwards its
+        //    arguments to native via window.webkit.messageHandlers.consoleLog.
+        let contentController = webView.configuration.userContentController
+        contentController.add(context.coordinator, name: "consoleLog")
+
+        let consoleBridgeJS = """
+        (function() {
+            function post(level, args) {
+                try {
+                    var msg = Array.prototype.map.call(args, function(a) {
+                        try { return (typeof a === 'object') ? JSON.stringify(a) : String(a); }
+                        catch (e) { return String(a); }
+                    }).join(' ');
+                    window.webkit.messageHandlers.consoleLog.postMessage(level + ': ' + msg);
+                } catch (e) {}
+            }
+            ['log', 'warn', 'error', 'info', 'debug'].forEach(function(level) {
+                var original = console[level];
+                console[level] = function() {
+                    post(level, arguments);
+                    if (original) { original.apply(console, arguments); }
+                };
+            });
+            // Also surface uncaught JS errors, which never hit console.* otherwise.
+            window.addEventListener('error', function(e) {
+                post('uncaught', [e.message + ' @ ' + (e.filename || '') + ':' + e.lineno]);
+            });
+        })();
+        """
+        let userScript = WKUserScript(
+            source: consoleBridgeJS,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        )
+        contentController.addUserScript(userScript)
+
+        // Bridge JS-initiated network calls (fetch / XMLHttpRequest / sendBeacon)
+        // to the Xcode console. WKWebView subresource requests happen in the web
+        // content process, so the app's URLSession/URLProtocol can't see them —
+        // wrapping the JS APIs is the reliable way to observe the ad script's RTB
+        // calls and tracking pixels.
+        contentController.add(context.coordinator, name: "networkLog")
+
+        let networkBridgeJS = """
+        (function() {
+            function post(obj) {
+                try { window.webkit.messageHandlers.networkLog.postMessage(JSON.stringify(obj)); }
+                catch (e) {}
+            }
+
+            // fetch
+            var origFetch = window.fetch;
+            if (origFetch) {
+                window.fetch = function(input, init) {
+                    var url = (typeof input === 'string') ? input : (input && input.url);
+                    var method = (init && init.method) || (input && input.method) || 'GET';
+                    post({ api: 'fetch', method: method, url: url });
+                    return origFetch.apply(this, arguments).then(function(res) {
+                        post({ api: 'fetch', phase: 'response', status: res.status, url: url });
+                        return res;
+                    }).catch(function(err) {
+                        post({ api: 'fetch', phase: 'error', url: url, error: String(err) });
+                        throw err;
+                    });
+                };
+            }
+
+            // XMLHttpRequest
+            var origOpen = XMLHttpRequest.prototype.open;
+            var origSend = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.open = function(method, url) {
+                this.__net = { method: method, url: url };
+                return origOpen.apply(this, arguments);
+            };
+            XMLHttpRequest.prototype.send = function(body) {
+                var info = this.__net || {};
+                post({ api: 'xhr', method: info.method, url: info.url });
+                this.addEventListener('loadend', function() {
+                    post({ api: 'xhr', phase: 'response', status: this.status, url: info.url });
+                });
+                return origSend.apply(this, arguments);
+            };
+
+            // navigator.sendBeacon (used for fire-and-forget tracking pixels)
+            if (navigator.sendBeacon) {
+                var origBeacon = navigator.sendBeacon.bind(navigator);
+                navigator.sendBeacon = function(url, data) {
+                    post({ api: 'sendBeacon', method: 'POST', url: url });
+                    return origBeacon(url, data);
+                };
+            }
+        })();
+        """
+        let networkScript = WKUserScript(
+            source: networkBridgeJS,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        )
+        contentController.addUserScript(networkScript)
+
         return webView
     }
     
@@ -138,7 +253,7 @@ struct WebViewRepresentable: UIViewRepresentable {
         Coordinator(self, navigateToBrand: $navigateToBrand)
     }
     
-    class Coordinator: NSObject, WKNavigationDelegate {
+    class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         let parent: WebViewRepresentable
         var navigateToBrand: Binding<String?>
         
@@ -147,8 +262,33 @@ struct WebViewRepresentable: UIViewRepresentable {
             self.navigateToBrand = navigateToBrand
         }
         
+        // MARK: - WKScriptMessageHandler
+        /// Receives console messages forwarded from the injected JS bridge.
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            switch message.name {
+            case "consoleLog":
+                print("🌐 [JS console] \(message.body)")
+            case "networkLog":
+                print("📡 [JS network] \(message.body)")
+            default:
+                break
+            }
+        }
+
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             print("✅ Surfside Ads WebView loaded successfully")
+
+            // Show what the page itself can see via document.cookie...
+            webView.evaluateJavaScript("document.cookie") { result, error in
+                print("🍪 document.cookie: \(result ?? error?.localizedDescription ?? "nil")")
+            }
+            // ...and everything in the webview's native cookie store (includes
+            // HttpOnly/other-domain cookies that document.cookie can't show).
+            webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
+                for cookie in cookies {
+                    print("🍪 [cookie store] \(cookie.name)=\(cookie.value) (domain: \(cookie.domain))")
+                }
+            }
             
             if let url = webView.url {
                 let scheme = url.scheme       // "https" or "myapp"
