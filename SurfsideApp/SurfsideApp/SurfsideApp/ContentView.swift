@@ -5,7 +5,7 @@ import SurfsideTracker
 struct ContentView: View {
     @State private var tracker: (any TrackerController)? = nil
     @State private var surfsideEvent: SurfsideEvent? = nil
-    @State private var logMessages: [String] = []
+    @State private var logBlocks: [[String]] = []
     @State private var isInitialized = false
     
     var body: some View {
@@ -56,7 +56,7 @@ struct ContentView: View {
                     .disabled(!isInitialized)
                     
                     Button("Clear Logs") {
-                        logMessages.removeAll()
+                        logBlocks.removeAll()
                     }
                     .buttonStyle(.borderless)
                     .foregroundColor(.secondary)
@@ -139,17 +139,49 @@ struct ContentView: View {
     }
     
     private var logSection: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(logMessages.enumerated()), id: \.offset) { index, message in
-                    logMessageView(index: index, message: message)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(logBlocks.enumerated()), id: \.offset) { blockIndex, block in
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(block.enumerated()), id: \.offset) { lineIndex, message in
+                                logMessageView(index: lineIndex, message: message)
+                            }
+                        }
+                        .padding(.vertical, 2)
+
+                        // Divider between each event block (not after the last)
+                        if blockIndex < logBlocks.count - 1 {
+                            Divider()
+                                .frame(height: 1)
+                                .background(Color.gray.opacity(0.5))
+                        }
+                    }
+
+                    // Invisible anchor at the bottom to auto-scroll to
+                    Color.clear
+                        .frame(height: 1)
+                        .id(logBottomAnchor)
+                }
+                .padding(4)
+            }
+            .frame(maxHeight: .infinity)
+            .border(Color.gray.opacity(0.3))
+            .onChange(of: totalLogLines) { _ in
+                withAnimation {
+                    proxy.scrollTo(logBottomAnchor, anchor: .bottom)
                 }
             }
         }
-        .frame(maxHeight: 200)
-        .border(Color.gray.opacity(0.3))
     }
-    
+
+    // Anchor id for the bottom of the log, and a count that changes whenever a
+    // new line is added so we know when to auto-scroll to the latest message.
+    private let logBottomAnchor = "logBottomAnchor"
+    private var totalLogLines: Int {
+        logBlocks.reduce(0) { $0 + $1.count }
+    }
+
     private func logMessageView(index: Int, message: String) -> some View {
         Text("\(index + 1). \(message)")
             .font(.system(size: 12, design: .monospaced))
@@ -159,14 +191,26 @@ struct ContentView: View {
             .background(Color.gray.opacity(0.1))
             .cornerRadius(4)
     }
-    
+
+    // Start a new log block — call at the beginning of each user action so
+    // its messages are visually grouped and separated from the previous action.
+    private func beginLogBlock() {
+        logBlocks.append([])
+    }
+
     // Helper function to add log messages with timestamp
     private func addLog(_ message: String) {
         let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
-        logMessages.append("[\(timestamp)] \(message)")
+        let line = "[\(timestamp)] \(message)"
+        if logBlocks.isEmpty {
+            logBlocks.append([line])
+        } else {
+            logBlocks[logBlocks.count - 1].append(line)
+        }
     }
     
     func initializeTracker() {
+        beginLogBlock()
         addLog("Starting tracker initialization...")
         
         // Use SurfsideHelper to create a tracker with the Surfside plugin
@@ -219,6 +263,7 @@ struct ContentView: View {
     }
 
     func trackScreenView() {
+        beginLogBlock()
         guard let tracker = tracker else {
             addLog("❌ Error: Tracker not initialized")
             return
@@ -233,6 +278,7 @@ struct ContentView: View {
     }
     
     func trackEvent() {
+        beginLogBlock()
         guard let tracker = tracker else {
             addLog("❌ Error: Tracker not initialized")
             return
@@ -255,6 +301,7 @@ struct ContentView: View {
     }
     
     func debugEventFlow() {
+        beginLogBlock()
         guard let tracker = tracker else {
             addLog("❌ Error: Tracker not initialized")
             return
@@ -280,6 +327,7 @@ struct ContentView: View {
     }
     
     func updateLocation() {
+        beginLogBlock()
         guard let surfsideEvent = surfsideEvent else {
             addLog("❌ Error: SurfsideEvent not initialized")
             return
@@ -305,6 +353,7 @@ struct ContentView: View {
     }
     
     func updateSource() {
+        beginLogBlock()
         guard let surfsideEvent = surfsideEvent else {
             addLog("❌ Error: SurfsideEvent not initialized")
             return
@@ -327,6 +376,7 @@ struct ContentView: View {
     }
     
     func updateSegment() {
+        beginLogBlock()
         guard let surfsideEvent = surfsideEvent else {
             addLog("❌ Error: SurfsideEvent not initialized")
             return
@@ -349,6 +399,7 @@ struct ContentView: View {
     }
     
     func trackPurchase() {
+        beginLogBlock()
         guard let surfsideEvent = surfsideEvent else {
             addLog("❌ Error: SurfsideEvent not initialized")
             return
@@ -384,6 +435,7 @@ struct ContentView: View {
     }
     
     func viewProduct() {
+        beginLogBlock()
         guard let tracker = tracker, let surfsideEvent = self.surfsideEvent else {
             addLog("❌ Error: Tracker or SurfsideEvent not initialized")
             return
