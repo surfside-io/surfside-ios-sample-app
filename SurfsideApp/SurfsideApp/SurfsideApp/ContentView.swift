@@ -3,17 +3,33 @@ import SurfsideTracker
 
 @available(iOS 14.0, macOS 11.0, *)
 struct ContentView: View {
-    @State private var tracker: (any TrackerController)? = nil
-    @State private var surfsideEvent: SurfsideEvent? = nil
     @State private var logBlocks: [[String]] = []
     @State private var isInitialized = false
+
+    // The source ID currently in use. It lives in @State (not as a local in
+    // initializeTracker) so the view can read it and re-render whenever it changes
+    // — e.g. after "Update Source" swaps it out.
+    @State private var sourceId = "00000-9-james"
+
+    // The tracker and its Surfside plugin, created in `initializeTracker()`.
+    // We hold the plugin instance and call commerce/context methods on it directly
+    // (e.g. `surfsidePlugin?.addProduct(...)`) — the standard Snowplow plugin usage.
+    @State private var tracker: TrackerController?
+    @State private var surfsidePlugin: SurfsidePlugin?
     
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             headerView
             statusView
-            buttonSection
+            // Buttons scroll in the upper region so the two full commerce grids
+            // don't push the log off-screen…
+            ScrollView {
+                buttonSection
+            }
+            // …and the log box stays pinned at the bottom with a fixed height so
+            // output is always visible while firing events.
             logSection
+                .frame(height: 260)
         }
         .padding()
     }
@@ -34,110 +50,154 @@ struct ContentView: View {
         }
     }
     
+    // Two equal columns, shared by both commerce grids.
+    private let commerceGridColumns = [GridItem(.flexible()), GridItem(.flexible())]
+
     private var buttonSection: some View {
         VStack(spacing: 20) {
-            // MARK: - Initialize, Debug, Clear Section
-            VStack(spacing: 8) {
-                Text("Initialize, Debug, Clear")
-                    .font(.headline)
-                    .foregroundColor(.primary)
-                
-                HStack(spacing: 12) {
-                    Button("Initialize Tracker") {
-                        initializeTracker()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isInitialized)
-                    
-                    Button("Debug Event Flow") {
-                        debugEventFlow()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!isInitialized)
-                    
-                    Button("Clear Logs") {
-                        logBlocks.removeAll()
-                    }
-                    .buttonStyle(.borderless)
-                    .foregroundColor(.secondary)
-                }
-            }
-            .padding()
-            .background(Color.gray.opacity(0.1))
-            .cornerRadius(10)
-            
-            // MARK: - Set Contexts Section
-            VStack(spacing: 8) {
-                Text("Set Contexts")
-                    .font(.headline)
-                    .foregroundColor(.primary)
-                
-                HStack(spacing: 12) {
-                    Button("Update Location") {
-                        updateLocation()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!isInitialized)
-                    
-                    Button("Update Source") {
-                        updateSource()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!isInitialized)
-                    
-                    Button("Update Segment") {
-                        updateSegment()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!isInitialized)
-                }
-            }
-            .padding()
-            .background(Color.blue.opacity(0.1))
-            .cornerRadius(10)
-            
-            // MARK: - Fire Events Section
-            VStack(spacing: 8) {
-                Text("Fire Events")
-                    .font(.headline)
-                    .foregroundColor(.primary)
-                
-                VStack(spacing: 8) {
-                    HStack(spacing: 12) {
-                        Button("Track Screen View") {
-                            trackScreenView()
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(!isInitialized)
-                        
-                        Button("Track Basic Event") {
-                            trackEvent()
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(!isInitialized)
-                    }
-                    
-                    HStack(spacing: 12) {
-                        Button("View Product (Commerce)") {
-                            viewProduct()
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(!isInitialized)
-                        
-                        Button("Purchase Product") {
-                            trackPurchase()
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(!isInitialized)
-                    }
-                }
-            }
-            .padding()
-            .background(Color.green.opacity(0.1))
-            .cornerRadius(10)
+            initializeDebugSection
+            setContextsSection
+            fireEventsSection
+            commerceEventAPISection
+            commerceStatefulSection
         }
     }
-    
+
+    // MARK: - Button sections
+    // Each section is a `sectionCard` (titled, tinted, rounded box). Split into
+    // separate computed properties both for readability and to keep each view body
+    // small enough for SwiftUI's type-checker.
+
+    private var initializeDebugSection: some View {
+        sectionCard("Initialize, Debug, Clear", tint: .gray) {
+            VStack(spacing: 8) {
+                HStack(spacing: 12) {
+                    Button("Initialize Tracker") { initializeTracker() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isInitialized)
+
+                    Button("Debug Event Flow") { debugEventFlow() }
+                        .buttonStyle(.bordered)
+                        .disabled(!isInitialized)
+
+                    Button("Clear Logs") { logBlocks.removeAll() }
+                        .buttonStyle(.borderless)
+                        .foregroundColor(.secondary)
+                }
+
+                // Reads the @State `sourceId`. Because it's @State, any change to it
+                // (e.g. in updateSource) re-runs body and this label updates itself.
+                Text("Source ID: \(sourceId)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private var setContextsSection: some View {
+        sectionCard("Set Contexts", tint: .blue) {
+            HStack(spacing: 12) {
+                Button("Update Location") { updateLocation() }
+                    .buttonStyle(.bordered)
+                    .disabled(!isInitialized)
+
+                Button("Update Source") { updateSource() }
+                    .buttonStyle(.bordered)
+                    .disabled(!isInitialized)
+
+                Button("Update Segment") { updateSegment() }
+                    .buttonStyle(.bordered)
+                    .disabled(!isInitialized)
+            }
+        }
+    }
+
+    private var fireEventsSection: some View {
+        sectionCard("Fire Events", tint: .green) {
+            VStack(spacing: 8) {
+                HStack(spacing: 12) {
+                    Button("Track Screen View") { trackScreenView() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!isInitialized)
+
+                    Button("Track Basic Event") { trackEvent() }
+                        .buttonStyle(.bordered)
+                        .disabled(!isInitialized)
+                }
+
+                HStack(spacing: 12) {
+                    Button("View Product (Commerce)") { viewProduct() }
+                        .buttonStyle(.bordered)
+                        .disabled(!isInitialized)
+
+                    Button("Purchase (Stateful API)") { trackPurchase() }
+                        .buttonStyle(.bordered)
+                        .disabled(!isInitialized)
+                }
+
+                HStack(spacing: 12) {
+                    Button("Purchase (Event API)") { trackPurchaseEventAPI() }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.purple)
+                        .disabled(!isInitialized)
+                }
+            }
+        }
+    }
+
+    private var commerceEventAPISection: some View {
+        sectionCard("Commerce Events (Event API)", tint: .purple) {
+            LazyVGrid(columns: commerceGridColumns, spacing: 8) {
+                ForEach(commerceEventSpecs) { spec in
+                    Button(spec.label) { trackCommerceEvent(spec.label, spec.make()) }
+                        .buttonStyle(.bordered)
+                        .tint(.purple)
+                        .disabled(!isInitialized)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
+    // Same action roster and grid layout as the Event API section above, but each
+    // button fires via the stateful plugin sequence (addProduct/addTransaction/
+    // addPromotion/addImpression + setCommerceAction) instead of a single event.
+    // Distinct "stf-" entity IDs so stateful vs event-API rows are separable in the DB.
+    private var commerceStatefulSection: some View {
+        sectionCard("Commerce Events (Stateful API)", tint: .blue) {
+            LazyVGrid(columns: commerceGridColumns, spacing: 8) {
+                ForEach(statefulEventSpecs) { spec in
+                    Button(spec.label) { trackStatefulEvent(spec.label, spec) }
+                        .buttonStyle(.bordered)
+                        .tint(.blue)
+                        .disabled(!isInitialized)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
+    /// A titled, tinted, rounded container — the shared chrome for every button section.
+    /// `@ViewBuilder` on the `content` closure lets callers pass normal view syntax
+    /// (multiple subviews, `if`, etc.) exactly as they would inside a `VStack`.
+    @ViewBuilder
+    private func sectionCard<Content: View>(
+        _ title: String,
+        tint: Color,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(spacing: 8) {
+            Text(title)
+                .font(.headline)
+                .foregroundColor(.primary)
+            content()
+        }
+        .padding()
+        .background(tint.opacity(0.1))
+        .cornerRadius(10)
+    }
+
     private var logSection: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -213,52 +273,52 @@ struct ContentView: View {
         beginLogBlock()
         addLog("Starting tracker initialization...")
         
-        // Use SurfsideHelper to create a tracker with the Surfside plugin
+        // Create a tracker with the Surfside plugin
         let namespace = "iosTracker"
         let endpoint = "https://c-dev.surfside.io"
         let accountId = "00000-1"
-        let sourceId = "00000-2"
-        
+        // sourceId now comes from @State (declared at the top), so no local here.
+
         addLog("Creating tracker with namespace: \(namespace)")
         addLog("Endpoint: \(endpoint)")
         addLog("Account ID: \(accountId), Source ID: \(sourceId)")
         
-        // Create the tracker and plugin with SurfsideHelper
-        // This will also register the tracker and fire the source event
+        // Create the tracker and plugin via the Surfside entry point.
+        // This builds the tracker (which self-registers in Snowplow's native registry)
+        // and fires the source event automatically.
         addLog("🔧 Creating tracker with POST method...")
-        let result = SurfsideHelper.createTracker(
+        let result = Surfside.createTracker(
             namespace: namespace,
-            environment: .development,
+            environment: .production,
             accountId: accountId,
             sourceId: sourceId
         )
-        
+
         // Add debugging for network configuration
         addLog("🌐 Network endpoint configured: \(endpoint)")
         addLog("📤 HTTP method: POST")
-        
+
         // Store references for later use
         self.tracker = result.tracker
-        self.surfsideEvent = result.plugin
+        self.surfsidePlugin = result.plugin
         self.isInitialized = true
-        
+
         addLog("✅ Tracker initialized successfully!")
-        addLog("📡 Source event fired automatically by SurfsideHelper with accountId: \(accountId), sourceId: \(sourceId)")
-        
+        addLog("📡 Source event fired automatically by Surfside.createTracker with accountId: \(accountId), sourceId: \(sourceId)")
+
+        let locationId = "san-fran-02"
+        let latitude = "37.7749"
+        let longitude = "-122.4194"
+        let countryCode = "US"
+        let state = "CA"
+        let city = "San Francisco"
+
         // Set location context after source
-        surfsideEvent?.setLocation(
-            latitude: "37.7749",
-            longitude: "-122.4194",
-            country_code: "US",
-            state: "CA",
-            city: "San Francisco",
-            trackerNamespaces: nil
-        )
+        result.plugin.setLocation(id: locationId, latitude: latitude, longitude: longitude, countryCode: countryCode, state: state, city: city)
         addLog("📍 Location set: San Francisco (37.7749, -122.4194)")
         
         // Force flush any pending events
         addLog("🚀 Flushing any pending events...")
-        tracker?.emitter?.flush()
         addLog("✅ Initialization complete - tracker ready for events")
     }
 
@@ -268,12 +328,13 @@ struct ContentView: View {
             addLog("❌ Error: Tracker not initialized")
             return
         }
-        
+
         addLog("🔥 Tracking basic screen viewed event...")
-        
+
+        // ScreenView is a plain Snowplow event — track it directly on the tracker.
         _ = tracker.track(ScreenView(name: "Home"))
         tracker.emitter?.flush()
-        
+
         addLog("✅ Basic event tracked and flushed")
     }
     
@@ -328,18 +389,18 @@ struct ContentView: View {
     
     func updateLocation() {
         beginLogBlock()
-        guard let surfsideEvent = surfsideEvent else {
-            addLog("❌ Error: SurfsideEvent not initialized")
+        guard let surfsidePlugin = surfsidePlugin else {
+            addLog("❌ Error: Surfside plugin not initialized")
             return
         }
         
         addLog("📍 Updating location context...")
         
         // Update location with new coordinates (example: New York)
-        surfsideEvent.setLocation(
+        surfsidePlugin.setLocation(
             latitude: "40.7128",
             longitude: "-74.0060",
-            country_code: "US",
+            countryCode: "US",
             state: "NY",
             city: "New York",
             trackerNamespaces: nil
@@ -354,21 +415,26 @@ struct ContentView: View {
     
     func updateSource() {
         beginLogBlock()
-        guard let surfsideEvent = surfsideEvent else {
-            addLog("❌ Error: SurfsideEvent not initialized")
+        guard let surfsidePlugin = surfsidePlugin else {
+            addLog("❌ Error: Surfside plugin not initialized")
             return
         }
         
         addLog("📡 Updating source context...")
         
         // Update source with new account and source IDs
-        surfsideEvent.source(
+        let newSourceId = "updated-source-456"
+        surfsidePlugin.source(
             accountId: "updated-account-123",
-            sourceId: "updated-source-456",
+            sourceId: newSourceId,
             trackerNamespaces: nil
         )
-        
-        addLog("✅ Source updated: accountId=updated-account-123, sourceId=updated-source-456")
+
+        // Keep our @State in sync so the on-screen "Source ID" reflects reality.
+        // Assigning to a @State var is what triggers SwiftUI to re-render body.
+        sourceId = newSourceId
+
+        addLog("✅ Source updated: accountId=updated-account-123, sourceId=\(newSourceId)")
         
         // Force flush to send the source update
         tracker?.emitter?.flush()
@@ -377,15 +443,15 @@ struct ContentView: View {
     
     func updateSegment() {
         beginLogBlock()
-        guard let surfsideEvent = surfsideEvent else {
-            addLog("❌ Error: SurfsideEvent not initialized")
+        guard let surfsidePlugin = surfsidePlugin else {
+            addLog("❌ Error: Surfside plugin not initialized")
             return
         }
         
         addLog("🎯 Updating segment context...")
         
         // Update segment with new segment data
-        surfsideEvent.segment(
+        surfsidePlugin.segment(
             segmentId: "premium-users",
             segmentVal: "1",
             trackerNamespaces: nil
@@ -400,16 +466,16 @@ struct ContentView: View {
     
     func trackPurchase() {
         beginLogBlock()
-        guard let surfsideEvent = surfsideEvent else {
-            addLog("❌ Error: SurfsideEvent not initialized")
+        guard let surfsidePlugin = surfsidePlugin else {
+            addLog("❌ Error: Surfside plugin not initialized")
             return
         }
         
         addLog("🛒 Tracking purchase event...")
         
         // Add purchase product
-        surfsideEvent.addProduct(
-            id: "demo-product-123",
+        surfsidePlugin.addProduct(
+            id: "demo-product-123-plugin",
             name: "Sample Product",
             list: "featured-products",
             brand: "Demo Brand",
@@ -425,28 +491,76 @@ struct ContentView: View {
         
         addLog("➕ Added purchase product: Sample Product ($29.99 x1)")
         
+        surfsidePlugin.addTransaction(
+            id: "james-order-plugin",
+            revenue: 100
+//            currency: "USD"
+        )
+        
         // Set commerce action to purchase
-        surfsideEvent.setCommerceAction(action: "purchase")
+        surfsidePlugin.setCommerceAction(action: "purchase")
         addLog("🛒 Purchase event fired for demo-product-123 ($29.99)")
         
         // Force flush events
         tracker?.emitter?.flush()
         addLog("🚀 Purchase events flushed to collector")
     }
-    
+
+    /// Event-API counterpart to `trackPurchase()`.
+    ///
+    /// Same wire payload (a commerce-action event carrying product + transaction
+    /// entities), but built as one explicit `SurfsidePurchaseEvent` instead of the
+    /// stateful addProduct → addTransaction → setCommerceAction sequence. Uses distinct
+    /// IDs and totals from the stateful button so both can be queried separately in the
+    /// collector.
+    func trackPurchaseEventAPI() {
+        beginLogBlock()
+        guard let tracker = tracker else {
+            addLog("❌ Error: Tracker not initialized")
+            return
+        }
+
+        addLog("🧩 Tracking purchase via EVENT API (SurfsidePurchaseEvent)...")
+
+        // Build the entities explicitly as values — no accumulator, no setCommerceAction.
+        let product = CommerceProductEntity(
+            id: "event-product-777-event",
+            name: "Event API Product",
+            list: "event-api-products",
+            brand: "Event Brand",
+            category: "Electronics",
+            variant: "Green",
+            price: 49.99,
+            quantity: 2,
+            coupon: "EVENT20",
+            position: 1,
+            currency: "USD"
+        )
+
+        let transaction = CommerceTransactionEntity(
+            id: "james-order-event",
+            revenue: "250",
+            currency: "USD"
+        )
+
+        let event = SurfsidePurchaseEvent(transaction: transaction, products: [product])
+        _ = tracker.track(event)
+        tracker.emitter?.flush()
+
+        addLog("➕ Product: Event API Product ($49.99 x2), id event-product-777")
+        addLog("💳 Transaction james-order-event, revenue $250")
+        addLog("🧩 SurfsidePurchaseEvent tracked + flushed (schema: \(CommerceActionEntity.schema))")
+    }
+
     func viewProduct() {
         beginLogBlock()
-        guard let tracker = tracker, let surfsideEvent = self.surfsideEvent else {
-            addLog("❌ Error: Tracker or SurfsideEvent not initialized")
+        guard let tracker = tracker, let surfsidePlugin = self.surfsidePlugin else {
+            addLog("❌ Error: Tracker or Surfside plugin not initialized")
             return
         }
         
         addLog("🛍️ Starting commerce product view flow...")
-        
-        // Force register the tracker with SurfsideController
-        surfsideEvent.registerTracker(tracker)
-        addLog("🔗 Tracker registered with SurfsideController")
-        
+
         // Add product to the commerce context FIRST
         addLog("📦 Adding product context:")
         addLog("  - ID: P12345")
@@ -454,8 +568,8 @@ struct ContentView: View {
         addLog("  - Price: $29.99")
         addLog("  - Quantity: 2")
 
-        surfsideEvent.addProduct(
-            id: "P12345",
+        surfsidePlugin.addProduct(
+            id: "P12345-James",
             name: "Premium Product",
             price: 29.99,
             quantity: 2
@@ -467,13 +581,180 @@ struct ContentView: View {
         addLog("🔍 Setting commerce action: 'detail'")
         addLog("📡 This will create commerce action event with attached product context")
         
-        surfsideEvent.setCommerceAction(action: "detail")
-        
+        surfsidePlugin.setCommerceAction(action: "detail")
+
         addLog("✅ Commerce action event tracked with product context")
-        
+
         // Force flush events
         tracker.emitter?.flush()
         addLog("🚀 Events flushed to collector")
+    }
+
+    // MARK: - Discrete event test helpers
+
+    /// A labeled discrete commerce event to render as a button. `make` builds a fresh
+    /// event on each tap so entities are never shared between taps.
+    private struct CommerceEventSpec: Identifiable {
+        let label: String
+        let make: () -> Event
+        var id: String { label }
+    }
+
+    /// One entry per discrete commerce event, each carrying demo entities. This is the
+    /// full roster of `SurfsideCommerceEvent` subclasses so every event can be fired and
+    /// inspected on its own.
+    private var commerceEventSpecs: [CommerceEventSpec] {
+        [
+            CommerceEventSpec(label: "View (detail)") { SurfsideProductViewEvent(products: [demoProduct(event: "detail")]) },
+            CommerceEventSpec(label: "Add (add)") { SurfsideAddToCartEvent(products: [demoProduct(event: "add")]) },
+            CommerceEventSpec(label: "Cart (cart)") { SurfsideCartViewEvent(products: [demoProduct(event: "cart")]) },
+            CommerceEventSpec(label: "Remove (remove)") { SurfsideRemoveFromCartEvent(products: [demoProduct(event: "remove")]) },
+            CommerceEventSpec(label: "Click (click)") { SurfsideProductClickEvent(products: [demoProduct(event: "click")]) },
+            CommerceEventSpec(label: "Checkout (checkout)") { SurfsideCheckoutEvent(products: [demoProduct(event: "checkout")], transaction: demoTransaction()) },
+            CommerceEventSpec(label: "Purchase (purchase)") { SurfsidePurchaseEvent(transaction: demoTransaction(), products: [demoProduct(event: "purchase")]) },
+            CommerceEventSpec(label: "Refund (refund)") { SurfsideRefundEvent(transaction: demoTransaction(), products: [demoProduct(event: "refund")]) },
+            CommerceEventSpec(label: "Promo Click (promo_click)") { SurfsidePromotionClickEvent(promotions: [demoPromotion()]) },
+            CommerceEventSpec(label: "Promo View (promotion_view)") { SurfsidePromotionViewEvent(promotions: [demoPromotion()]) },
+            CommerceEventSpec(label: "Impression (impression)") { SurfsideImpressionEvent(impressions: [demoImpression()]) },
+        ]
+    }
+
+    /// Tracks a single discrete commerce event and flushes, logging the outcome.
+    private func trackCommerceEvent(_ label: String, _ event: Event) {
+        beginLogBlock()
+        guard let tracker = tracker else {
+            addLog("❌ Error: Tracker not initialized")
+            return
+        }
+        addLog("🧩 [Event API] \(label)...")
+        _ = tracker.track(event)
+        tracker.emitter?.flush()
+        addLog("✅ \(label) tracked + flushed (schema: \(CommerceActionEntity.schema))")
+    }
+
+    // MARK: - Stateful API test helpers
+
+    /// A labeled stateful commerce action. `fire` runs the plugin sequence
+    /// (add* contexts + setCommerceAction) on each tap; setCommerceAction flushes
+    /// and clears the accumulated commerce contexts itself.
+    private struct StatefulEventSpec: Identifiable {
+        let label: String
+        let fire: (SurfsidePlugin) -> Void
+        var id: String { label }
+    }
+
+    /// The same action roster as `commerceEventSpecs`, one entry per label, but each
+    /// assembled the stateful way. Product actions add a product; checkout/purchase/refund
+    /// add a transaction too; promo actions add a promotion; impression adds an impression.
+    private var statefulEventSpecs: [StatefulEventSpec] {
+        [
+            StatefulEventSpec(label: "View (detail)") { p in addDemoProduct(p); p.setCommerceAction(action: "detail") },
+            StatefulEventSpec(label: "Add (add)") { p in addDemoProduct(p); p.setCommerceAction(action: "add") },
+            StatefulEventSpec(label: "Cart (cart)") { p in addDemoProduct(p); p.setCommerceAction(action: "cart") },
+            StatefulEventSpec(label: "Remove (remove)") { p in addDemoProduct(p); p.setCommerceAction(action: "remove") },
+            StatefulEventSpec(label: "Click (click)") { p in addDemoProduct(p); p.setCommerceAction(action: "click") },
+            StatefulEventSpec(label: "Checkout (checkout)") { p in addDemoProduct(p); addDemoTransaction(p); p.setCommerceAction(action: "checkout") },
+            StatefulEventSpec(label: "Purchase (purchase)") { p in addDemoProduct(p); addDemoTransaction(p); p.setCommerceAction(action: "purchase") },
+            StatefulEventSpec(label: "Refund (refund)") { p in addDemoProduct(p); addDemoTransaction(p); p.setCommerceAction(action: "refund") },
+            StatefulEventSpec(label: "Promo Click (promo_click)") { p in addDemoPromotion(p); p.setCommerceAction(action: "promo_click") },
+            StatefulEventSpec(label: "Promo View (promotion_view)") { p in addDemoPromotion(p); p.setCommerceAction(action: "promotion_view") },
+            StatefulEventSpec(label: "Impression (impression)") { p in addDemoImpression(p); p.setCommerceAction(action: "impression") },
+        ]
+    }
+
+    /// Runs a single stateful commerce action, logging the outcome. Mirrors
+    /// `trackCommerceEvent` so both sections read identically in the log.
+    private func trackStatefulEvent(_ label: String, _ spec: StatefulEventSpec) {
+        beginLogBlock()
+        guard let surfsidePlugin = surfsidePlugin else {
+            addLog("❌ Error: Surfside plugin not initialized")
+            return
+        }
+        addLog("🔁 [Stateful API] \(label)...")
+        spec.fire(surfsidePlugin)
+        addLog("✅ \(label) tracked + flushed (schema: \(CommerceActionEntity.schema))")
+    }
+
+    // MARK: - Demo commerce contexts for the stateful buttons
+    // Distinct "stf-" IDs (vs the event API's "evt-") so the two paths are separable
+    // in the collector while carrying the same shape of data.
+    
+    
+
+    private func addDemoProduct(_ p: SurfsidePlugin) {
+        p.addProduct(
+            id: "stf-product-1",
+            name: "Stateful Demo Product",
+            brand: "Demo Brand",
+            category: "Electronics",
+            price: 19.99,
+            quantity: 1,
+            currency: "USD"
+        )
+    }
+
+    private func addDemoTransaction(_ p: SurfsidePlugin) {
+        p.addTransaction(id: "stf-order-1", revenue: 39.98, currency: "USD")
+    }
+
+    private func addDemoPromotion(_ p: SurfsidePlugin) {
+        p.addPromotion(
+            id: "stf-promo-1",
+            name: "Stateful Demo Promo",
+            creative: "banner",
+            position: "home_top",
+            currency: "USD"
+        )
+    }
+
+    private func addDemoImpression(_ p: SurfsidePlugin) {
+        p.addImpression(
+            id: "stf-impr-1",
+            name: "Stateful Demo Impression",
+            list: "search-results",
+            position: 1,
+            price: 19.99,
+            currency: "USD"
+        )
+    }
+
+    // MARK: - Demo entities for the discrete event buttons
+
+    private func demoProduct(event: String) -> CommerceProductEntity {
+        CommerceProductEntity(
+            id: "evt-product-1-" + event,
+            name: "Event Demo Product-" + event,
+            brand: "Demo Brand",
+            category: "Electronics",
+            price: 19.99,
+            quantity: 1,
+            currency: "USD"
+        )
+    }
+
+    private func demoTransaction() -> CommerceTransactionEntity {
+        CommerceTransactionEntity(id: "evt-order-1", revenue: "39.98", currency: "USD")
+    }
+
+    private func demoPromotion() -> CommercePromotionEntity {
+        CommercePromotionEntity(
+            id: "evt-promo-1",
+            name: "Event Demo Promo",
+            creative: "banner",
+            position: "home_top",
+            currency: "USD"
+        )
+    }
+
+    private func demoImpression() -> CommerceImpressionEntity {
+        CommerceImpressionEntity(
+            id: "evt-impr-1",
+            name: "Event Demo Impression",
+            list: "search-results",
+            position: 1,
+            price: "19.99",
+            currency: "USD"
+        )
     }
 }
 
