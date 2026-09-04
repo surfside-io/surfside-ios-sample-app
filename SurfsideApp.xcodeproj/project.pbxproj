@@ -11,6 +11,7 @@
 		026389F52E2151AA00BF2B49 /* SurfsideTracker in Frameworks */ = {isa = PBXBuildFile; productRef = 026389F42E2151AA00BF2B49 /* SurfsideTracker */; };
 		02638A022E285D5700BF2B49 /* SurfsideTracker in Frameworks */ = {isa = PBXBuildFile; productRef = 02638A012E285D5700BF2B49 /* SurfsideTracker */; };
 		02E94B812E29E21E00F3BF6B /* SurfsideTracker in Frameworks */ = {isa = PBXBuildFile; productRef = 02E94B802E29E21E00F3BF6B /* SurfsideTracker */; };
+		ADCA0001ADCA0001ADCA0001 /* SurfsideAdsKit in Frameworks */ = {isa = PBXBuildFile; productRef = ADCA0002ADCA0002ADCA0002 /* SurfsideAdsKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -53,6 +54,7 @@
 				026389F52E2151AA00BF2B49 /* SurfsideTracker in Frameworks */,
 				02638A022E285D5700BF2B49 /* SurfsideTracker in Frameworks */,
 				0209B81C2E20F6110037171C /* SurfsideTracker in Frameworks */,
+				ADCA0001ADCA0001ADCA0001 /* SurfsideAdsKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -131,6 +133,7 @@
 				026389F42E2151AA00BF2B49 /* SurfsideTracker */,
 				02638A012E285D5700BF2B49 /* SurfsideTracker */,
 				02E94B802E29E21E00F3BF6B /* SurfsideTracker */,
+				ADCA0002ADCA0002ADCA0002 /* SurfsideAdsKit */,
 			);
 			productName = SurfsideApp;
 			productReference = 0209B7E62E20ED310037171C /* SurfsideApp.app */;
@@ -216,6 +219,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				02E94B7F2E29E21E00F3BF6B /* XCLocalSwiftPackageReference "../surfside-ios-tracker" */,
+				ADCA0003ADCA0003ADCA0003 /* XCLocalSwiftPackageReference "../SurfsideAdsKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0209B7E72E20ED310037171C /* Products */;
@@ -419,7 +423,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = U36469S5JM;
+				DEVELOPMENT_TEAM = AYGM8N7F5N;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = surfside.ios.sampleapp;
@@ -428,12 +432,13 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = surfside.ios.sampleapp;
+				PRODUCT_BUNDLE_IDENTIFIER = jamesspillmann;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -451,7 +456,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = U36469S5JM;
+				DEVELOPMENT_TEAM = AYGM8N7F5N;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = surfside.ios.sampleapp;
@@ -460,12 +465,13 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = surfside.ios.sampleapp;
+				PRODUCT_BUNDLE_IDENTIFIER = jamesspillmann;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -588,6 +594,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "../surfside-ios-tracker";
 		};
+		ADCA0003ADCA0003ADCA0003 /* XCLocalSwiftPackageReference "../SurfsideAdsKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../SurfsideAdsKit";
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -606,6 +616,11 @@
 		02E94B802E29E21E00F3BF6B /* SurfsideTracker */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SurfsideTracker;
+		};
+		ADCA0002ADCA0002ADCA0002 /* SurfsideAdsKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = ADCA0003ADCA0003ADCA0003 /* XCLocalSwiftPackageReference "../SurfsideAdsKit" */;
+			productName = SurfsideAdsKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
