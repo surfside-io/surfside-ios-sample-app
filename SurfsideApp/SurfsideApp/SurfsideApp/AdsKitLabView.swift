@@ -98,20 +98,27 @@ final class AdsKitLabModel: ObservableObject {
     @Published var maxItems: Int = 4
 
     /// The instance that made the last fetch; recordImpression/recordClick must
-    /// go through it. Rebuilt per fetch so identity-mode changes take effect.
+    /// go through it. Kept across fetches, because each SurfsideAds owns the warm ad
+    /// page; rebuilt only when the identity mode changes (userId is fixed per instance).
     private(set) var ads: SurfsideAds?
+    private var adsUserId: String??
 
     func fetchCarousel() {
-        let cfg = SurfsideAds.Configuration(
-            accountId: Self.carouselAccount.accountId,
-            siteId: Self.carouselAccount.siteId,
-            channelId: Self.carouselAccount.channelId,
-            locationId: Self.carouselAccount.locationId,
-            isInspectable: true,
-            userId: configuredUserId
-        )
-        let ads = SurfsideAds(configuration: cfg)
-        self.ads = ads
+        let ads: SurfsideAds
+        if let existing = self.ads, adsUserId == .some(configuredUserId) {
+            ads = existing
+        } else {
+            ads = SurfsideAds(configuration: .init(
+                accountId: Self.carouselAccount.accountId,
+                siteId: Self.carouselAccount.siteId,
+                channelId: Self.carouselAccount.channelId,
+                locationId: Self.carouselAccount.locationId,
+                isInspectable: true,
+                userId: configuredUserId
+            ))
+            self.ads = ads
+            adsUserId = .some(configuredUserId)
+        }
 
         fetchStatus = .loading
         products = []
@@ -174,15 +181,22 @@ final class AdsKitLabModel: ObservableObject {
     // MARK: Banner (JJRC-338 banners)
 
     enum BannerSize: String, CaseIterable, Identifiable {
-        case standard = "320×50"
-        case mrec = "300×250"
+        // `size` is the bid ratio Surfside serves banners by, not a pixel box.
+        case eightByOne = "8x1"
+        case fourByOne = "4x1"
+        case twoByOne = "2x1"
         var id: String { rawValue }
-        var cgSize: CGSize {
-            self == .standard ? CGSize(width: 320, height: 50)
-                              : CGSize(width: 300, height: 250)
+        var ratio: CGSize {
+            switch self {
+            case .eightByOne: return CGSize(width: 8, height: 1)
+            case .fourByOne: return CGSize(width: 4, height: 1)
+            case .twoByOne: return CGSize(width: 2, height: 1)
+            }
         }
+        /// The on-screen frame the host gives the banner, at that ratio.
+        var frame: CGSize { CGSize(width: 320, height: 320 * ratio.height / ratio.width) }
     }
-    @Published var bannerSize: BannerSize = .standard
+    @Published var bannerSize: BannerSize = .eightByOne
     @Published var bannerStatus: String = "not loaded"
     @Published var bannerCollapsed = false
     /// Bumping this recreates the SwiftUI banner (its placement is fixed at init).
@@ -384,14 +398,14 @@ struct AdsKitLabView: View {
                         isInspectable: true
                     ),
                     zoneId: AdsKitLabModel.bannerZone,
-                    size: model.bannerSize.cgSize,
+                    size: model.bannerSize.ratio,
                     onLoad: { model.bannerLoaded($0) },
                     onNoFill: { model.bannerNoFill() },
                     onError: { model.bannerFailed($0) }
                 )
                 .id(model.bannerToken)
-                .frame(width: model.bannerSize.cgSize.width,
-                       height: model.bannerSize.cgSize.height)
+                .frame(width: model.bannerSize.frame.width,
+                       height: model.bannerSize.frame.height)
                 .frame(maxWidth: .infinity)
                 .overlay(RoundedRectangle(cornerRadius: 4)
                     .stroke(Color.secondary.opacity(0.4), style: StrokeStyle(lineWidth: 1, dash: [4])))
