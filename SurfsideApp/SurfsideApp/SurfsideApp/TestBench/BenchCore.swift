@@ -244,6 +244,8 @@ final class Bench: ObservableObject {
     @Published var banners: [BannerSlot] = []
     @Published var showSheet = false
     @Published var status = ""
+    /// Live progress lines for a long case (the soak).
+    @Published var live: [String] = []
 
     private var promptContinuation: CheckedContinuation<Bool, Never>?
     private var bannerWaiters: [UUID: (String, Int) -> Void] = [:]

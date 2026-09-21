@@ -812,12 +812,22 @@ enum BenchCases {
             var outcomes: [Outcome] = []
             var minute = 0
             while Date() < end {
-                outcomes.append(await bench.fetch(ads))
-                let elapsed = Int(Date().timeIntervalSince(end.addingTimeInterval(TimeInterval(-minutes * 60))) / 60)
+                let latest = await bench.fetch(ads)
+                outcomes.append(latest)
+                let seconds = Int(Date().timeIntervalSince(end.addingTimeInterval(TimeInterval(-minutes * 60))))
+                let filled = outcomes.filter(\.filled).count
+                let empty = outcomes.filter { $0.succeeded && !$0.filled }.count
+                let reloads = tap.since(mark).filter { $0.contains("page: loading") }.count
+                bench.live = [
+                    String(format: "%d:%02d of %d:00", seconds / 60, seconds % 60, minutes),
+                    "fetches \(outcomes.count): \(filled) filled, \(empty) empty, \(outcomes.count - filled - empty) failed",
+                    "last: \(latest.text)",
+                    "slowest \(outcomes.map(\.ms).max() ?? 0)ms, page loads \(reloads)",
+                ]
+                let elapsed = seconds / 60
                 if elapsed > minute {
                     minute = elapsed
                     NSLog("%@", "BENCH   soak minute \(minute): " + bench.summary(outcomes))
-                    bench.status = "soak \(minute)/\(minutes) min"
                 }
                 await bench.sleep(5)
             }

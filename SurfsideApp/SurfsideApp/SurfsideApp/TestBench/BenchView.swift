@@ -70,6 +70,15 @@ struct BenchView: View {
             Text("run \(bench.runId) · create: \(bench.createMode)").font(.caption.monospaced())
             Text(bench.tally.isEmpty ? "not started" : bench.tally).font(.subheadline.bold())
             if !bench.status.isEmpty { Text(bench.status).font(.caption).foregroundColor(.secondary) }
+            if !bench.live.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(bench.live, id: \.self) { Text($0).font(.footnote.monospaced()) }
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.green.opacity(0.15))
+                .cornerRadius(8)
+            }
         }
     }
 
