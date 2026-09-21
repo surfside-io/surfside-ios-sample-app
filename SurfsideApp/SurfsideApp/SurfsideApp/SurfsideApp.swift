@@ -11,6 +11,12 @@ import SwiftUI
 @available(iOS 14.0, macOS 11.0, *)
 @main
 struct SurfsideSampleApp: App {
+    init() {
+        // AdsKit Test Bench: case A2 needs a fetch issued before any window exists.
+        _ = Bench.processStart
+        Bench.shared.appInit()
+    }
+
     var body: some Scene {
         WindowGroup {
             MainTabView()
