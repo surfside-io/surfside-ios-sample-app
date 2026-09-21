@@ -95,7 +95,7 @@ enum BenchCases {
             let good = await bench.fetch(main)
             ctx.note("good fetch after: " + good.text)
             ctx.expect(a.result != nil && z.result != nil, "both resolved")
-            ctx.expect(a.ms < 9500 && z.ms < 9500, "neither waited past the 8s ceiling")
+            ctx.expect(a.ms < 10500 && z.ms < 10500, "neither waited past the 8s ceiling (plus WebView start on the one-shot path)")
             ctx.expect(good.filled, "page still serves a good fetch")
         },
         BenchCase(id: "A5", title: "maxItems 1, 4, 10, 20, 50", kind: .auto) { ctx in
@@ -465,6 +465,7 @@ enum BenchCases {
         },
         BenchCase(id: "E4", title: "Released mid-fetch, on main and off main", kind: .auto) { ctx in
             let bench = ctx.bench
+            let baseline = Bench.hiddenPages().count
             for offMain in [false, true] {
                 var ads: SurfsideAds? = SurfsideAds(configuration: bench.config())
                 await bench.sleep(1.0)
@@ -477,8 +478,22 @@ enum BenchCases {
                 }
                 let outcome = await pending.wait()
                 ctx.note("offMain \(offMain): " + outcome.text)
-                ctx.expect(outcome.result != nil && !outcome.succeeded && outcome.ms < 1000, "waiting fetch fails at once (offMain \(offMain))")
+                ctx.expectFilled([outcome], "the fetch still delivers, as in 1.0.0 (offMain \(offMain))")
+                await bench.sleep(0.5)
+                ctx.expect(Bench.hiddenPages().count == baseline, "its page is gone once the fetch resolved (offMain \(offMain))")
             }
+        },
+        BenchCase(id: "E10", title: "Throwaway instance: SurfsideAds(...).fetchProducts, never retained", kind: .auto) { ctx in
+            let bench = ctx.bench
+            let baseline = Bench.hiddenPages().count
+            var outcomes: [Outcome] = []
+            for _ in 0..<3 {
+                outcomes.append(await bench.begin(SurfsideAds(configuration: bench.config())).wait())
+            }
+            ctx.note(bench.summary(outcomes))
+            ctx.expectFilled(outcomes, "works without holding the instance, as in 1.0.0")
+            await bench.sleep(0.5)
+            ctx.expect(Bench.hiddenPages().count == baseline, "no page left behind")
         },
         BenchCase(id: "E5", title: "Create and release 30 instances", kind: .auto) { ctx in
             let bench = ctx.bench
