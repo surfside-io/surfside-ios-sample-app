@@ -209,9 +209,11 @@ final class Bench: ObservableObject {
     static let processStart = Date()
 
     // Carousel (fills), banner that fills (staging), banner that never fills.
-    // James's playground ids (2026-09-21). Never point the bench at a live publisher: a full
-    // run is several hundred real bid requests. Override per launch with
-    // `-benchIds account,site,channel,location,zone` and `-benchBannerZone zone`.
+    // James's test ids (2026-09-21): the carousel is served by the house campaign "Bottlecaps SPA
+    // Test" (placement 1014003), banners by "James Playground" (1016784). Never point the bench
+    // at a live advertiser's demand: a full run is several hundred real bid requests. Override per launch with
+    // `-benchIds account,site,channel,location,zone` (carousel),
+    // `-benchBannerIds account,site,channel,location,zone` and `-benchStrategy sponsored|hybrid|recommended`.
     private static func argument(_ name: String) -> String? {
         let args = ProcessInfo.processInfo.arguments
         guard let i = args.firstIndex(of: name), args.indices.contains(i + 1) else { return nil }
@@ -219,14 +221,19 @@ final class Bench: ObservableObject {
     }
     private static let ids: [String] = {
         let given = argument("-benchIds")?.split(separator: ",").map(String.init) ?? []
-        return given.count == 5 ? given : ["00000", "00000", "00000", "james-playground", "00000"]
+        return given.count == 5 ? given : ["94907", "c775a", "00000", "12917", "00000"]
     }()
     static let account = ids[0], site = ids[1], channel = ids[2], location = ids[3], zone = ids[4]
-    static let filledBanner = (account: account, site: site, channel: channel,
-                               location: location, zone: argument("-benchBannerZone") ?? "00000")
+    private static let bannerIds: [String] = {
+        let given = argument("-benchBannerIds")?.split(separator: ",").map(String.init) ?? []
+        return given.count == 5 ? given : ["00000", "bg1c9", "00000", "james-playground", "00000"]
+    }()
+    static let filledBanner = (account: bannerIds[0], site: bannerIds[1], channel: bannerIds[2],
+                               location: bannerIds[3], zone: bannerIds[4])
     // Same placement under a location that cannot exist, so it never fills.
-    static let emptyBanner = (account: account, site: site, channel: channel,
-                              location: "bench-no-such-location", zone: argument("-benchBannerZone") ?? "00000")
+    static let emptyBanner = (account: bannerIds[0], site: bannerIds[1], channel: bannerIds[2],
+                              location: "bench-no-such-location", zone: bannerIds[4])
+    static let strategy = SurfsideAds.Strategy(rawValue: argument("-benchStrategy") ?? "sponsored") ?? .sponsored
 
     let runId = String(UUID().uuidString.prefix(6)).lowercased()
     let args = ProcessInfo.processInfo.arguments
@@ -305,7 +312,7 @@ final class Bench: ObservableObject {
                watchdog: TimeInterval = 25) -> PendingFetch {
         let pending = PendingFetch()
         let started = Date()
-        ads.fetchProducts(zoneId: zone, maxItems: maxItems) { [weak self] result in
+        ads.fetchProducts(zoneId: zone, maxItems: maxItems, strategy: Bench.strategy) { [weak self] result in
             let onMain = Thread.isMainThread
             DispatchQueue.main.async {
                 if !onMain { self?.violation("completion delivered off the main thread") }
