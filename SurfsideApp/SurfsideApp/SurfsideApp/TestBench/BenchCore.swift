@@ -209,13 +209,24 @@ final class Bench: ObservableObject {
     static let processStart = Date()
 
     // Carousel (fills), banner that fills (staging), banner that never fills.
-    static let account = "4c9d3", site = "23191", channel = "00000"
-    static let location = "fe025dd0-85c4-4041-bc15-1051def8aa49"
-    static let zone = "3ZG7D"
-    static let filledBanner = (account: "54b93", site: "2f59a", channel: "bf9bc",
-                               location: "98f90072f2f1b1cd", zone: "JX5Qa")
-    static let emptyBanner = (account: "ec981", site: "544fa", channel: "00000",
-                              location: "greengoddess", zone: "6ambm")
+    // James's playground ids (2026-09-21). Never point the bench at a live publisher: a full
+    // run is several hundred real bid requests. Override per launch with
+    // `-benchIds account,site,channel,location,zone` and `-benchBannerZone zone`.
+    private static func argument(_ name: String) -> String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: name), args.indices.contains(i + 1) else { return nil }
+        return args[i + 1]
+    }
+    private static let ids: [String] = {
+        let given = argument("-benchIds")?.split(separator: ",").map(String.init) ?? []
+        return given.count == 5 ? given : ["00000", "00000", "00000", "james-playground", "00000"]
+    }()
+    static let account = ids[0], site = ids[1], channel = ids[2], location = ids[3], zone = ids[4]
+    static let filledBanner = (account: account, site: site, channel: channel,
+                               location: location, zone: argument("-benchBannerZone") ?? "00000")
+    // Same placement under a location that cannot exist, so it never fills.
+    static let emptyBanner = (account: account, site: site, channel: channel,
+                              location: "bench-no-such-location", zone: argument("-benchBannerZone") ?? "00000")
 
     let runId = String(UUID().uuidString.prefix(6)).lowercased()
     let args = ProcessInfo.processInfo.arguments
