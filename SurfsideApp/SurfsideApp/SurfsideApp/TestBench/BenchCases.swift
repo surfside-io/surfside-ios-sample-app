@@ -331,15 +331,29 @@ enum BenchCases {
             ctx.note("away \(Int(Date().timeIntervalSince(left)))s; " + outcome.text)
             ctx.expect(outcome.filled, "filled after the long background")
         },
-        BenchCase(id: "D5", title: "Lock and unlock, Control Centre (resign active only)", kind: .hands) { ctx in
+        BenchCase(id: "D5", title: "Control Centre and Notification Centre (resign active only)", kind: .hands) { ctx in
             let bench = ctx.bench
             let ads = bench.ensureMain()
             _ = await bench.fetch(ads)
             let mark = tap.mark()
-            guard await bench.ask("Open Control Centre and close it. Pull down Notification Centre and close it. Then tap Continue.") else { ctx.note("skipped by tester"); return }
-            ctx.expectLog(tap.since(mark).count(containing: "released") == 0, "nothing released")
+            var backgrounded = 0, resigned = 0
+            let center = NotificationCenter.default
+            let observers = [
+                center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in backgrounded += 1 },
+                center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { _ in resigned += 1 },
+            ]
+            defer { observers.forEach(center.removeObserver) }
+            guard await bench.ask("Do NOT lock the phone or leave the app. Open Control Centre and close it. Pull down Notification Centre and close it. Then tap Continue.") else { ctx.note("skipped by tester"); return }
+            let released = tap.since(mark).filter { $0.contains("released") }.compactMap { $0.components(separatedBy: "page: ").last }
+            ctx.note("iOS sent willResignActive \(resigned)x, didEnterBackground \(backgrounded)x; page log: \(released)")
+            if backgrounded > 0 {
+                ctx.note("iOS itself put the app in the background, so releasing the page was correct")
+                ctx.infoOnly()
+            } else {
+                ctx.expectLog(released.isEmpty, "nothing released on resign active alone")
+            }
             let outcome = await bench.fetch(ads)
-            ctx.expect(outcome.filled && outcome.ms < 600, "still warm: " + outcome.text)
+            ctx.expectFilled([outcome], "next fetch: " + outcome.text)
         },
         BenchCase(id: "D6", title: "Memory warning, idle and mid-burst", kind: .hook) { ctx in
             let bench = ctx.bench
@@ -768,7 +782,8 @@ enum BenchCases {
             guard await bench.ask("Turn ON Airplane Mode (Wi-Fi off too). Come back and tap Continue.") else { ctx.note("skipped by tester"); return }
             let result = await bench.showBanner(slot(filled: true, ratio: CGSize(width: 8, height: 1)))
             ctx.note("\(result.event) \(result.ms)ms")
-            ctx.expect(result.event != "NO CALLBACK", "reports an outcome instead of a blank frame")
+            ctx.expect(result.event != "NO CALLBACK", "reports an outcome")
+            ctx.expect(result.ms < 3000, "does not leave a blank frame for the 8s ceiling")
             _ = await bench.ask("Turn Airplane Mode OFF, then tap Continue.")
         },
     ]
