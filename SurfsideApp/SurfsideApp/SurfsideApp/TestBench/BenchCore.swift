@@ -31,6 +31,11 @@ final class LogTap {
     func start() {
         guard !started else { return }
         started = true
+        // Launched from the Home Screen there is no terminal on stderr, and NSLog then skips
+        // it; this makes it write there anyway. A console that detaches mid-run (backgrounding,
+        // airplane mode) must not kill the app with SIGPIPE either.
+        setenv("CFLOG_FORCE_STDERR", "YES", 1)
+        signal(SIGPIPE, SIG_IGN)
         savedStderr = dup(STDERR_FILENO)
         setvbuf(stderr, nil, _IONBF, 0)
         dup2(pipe.fileHandleForWriting.fileDescriptor, STDERR_FILENO)
@@ -257,7 +262,6 @@ final class Bench: ObservableObject {
 
     /// Called from `App.init`, before any window exists.
     func appInit() {
-        guard args.contains("-benchAuto") || args.contains("-benchSoak") || args.contains("-bench") else { return }
         LogTap.shared.start()
         if createMode == "init" {
             main = SurfsideAds(configuration: config())
