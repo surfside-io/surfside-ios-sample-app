@@ -268,7 +268,10 @@ enum BenchCases {
                 let click: Bool = await withCheckedContinuation { c in recorder.recordClick(first) { c.resume(returning: $0) } }
                 ctx.note("C3 second recordImpression for product \(first.id): \(again); recordClick: \(click)")
             }
-            ctx.note("CHECK IN surf_events at \(ISO8601DateFormatter().string(from: Date())) UTC, user \(user): expect \(products.count) wins + \(products.count) impressions (+1 each if C3 is not deduped), 1 click; products \(products.map(\.id))")
+            // Only sponsored cards carry trackers; organic recommendations in a hybrid carousel have none.
+            let tracked = products.filter { !$0.winTrackerURLs.isEmpty || !$0.impressionTrackerURLs.isEmpty }
+            ctx.note("\(tracked.count) of \(products.count) products carry trackers (sponsored): \(tracked.map(\.id)); first product tracked: \(products.first.map { p in tracked.contains { $0.id == p.id } } ?? false)")
+            ctx.note("CHECK IN surf_events at \(ISO8601DateFormatter().string(from: Date())) UTC, user \(user): expect \(tracked.count) wins + \(tracked.count) impressions (+1 each if the first product is tracked and C3 is not deduped), 1 click if the first product is tracked; products \(products.map(\.id))")
         },
     ]
 
