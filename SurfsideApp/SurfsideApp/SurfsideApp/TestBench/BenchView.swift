@@ -189,7 +189,7 @@ struct SoakPanel: View {
     private var filled: Int { samples.filter { $0.outcome == "filled" }.count }
     private var empty: Int { samples.filter { $0.outcome == "empty" }.count }
     private var failed: Int { samples.count - filled - empty }
-    private var loads: Int { soak.pageEvents.filter { $0.hasPrefix("loading") }.count }
+    private var loads: Int { soak.pageEvents.filter { $0.contains(" loading") }.count }
     private var recycles: Int { soak.pageEvents.filter { $0.contains("recycle after") }.count }
     /// Fetches on the current page (the SDK recycles at 50, or 30 minutes).
     private var sincePageLoad: Int {

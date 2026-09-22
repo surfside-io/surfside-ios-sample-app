@@ -440,6 +440,30 @@ enum BenchCases {
             ctx.expect(outcomes.filter(\.filled).count >= 118, "at most 2 genuine no-bids")
             ctx.expectLog(tap.since(mark).count(containing: "recycle after 50 fetches") == 2, "recycled at 50 and at 100")
         },
+        BenchCase(id: "D11", title: "Recycle by time (threshold shrunk to 10s)", kind: .hook) { ctx in
+            #if DEBUG
+            let bench = ctx.bench
+            let ads = bench.replaceMain()
+            await bench.sleep(1.5)
+            let warm = await bench.fetch(ads)
+            ctx.note("warm: " + warm.text)
+            let saved = CarouselPage.recycleAfterSeconds
+            CarouselPage.recycleAfterSeconds = 10
+            defer { CarouselPage.recycleAfterSeconds = saved }
+            let early = await bench.fetch(ads)
+            ctx.note("at once: " + early.text)
+            await bench.sleep(11)
+            let mark = tap.mark()
+            let late = await bench.fetch(ads)
+            ctx.note("after 11s: " + late.text)
+            let lines = tap.since(mark)
+            ctx.expect(warm.filled && early.filled && late.filled, "all three filled")
+            ctx.expectLog(lines.count(containing: "recycle after") == 1, "the fetch after the threshold recycled the page")
+            ctx.note("page log: " + lines.filter { $0.contains("page:") }.map { String($0.suffix(70)) }.joined(separator: " | "))
+            #else
+            ctx.note("needs a Debug build")
+            #endif
+        },
         BenchCase(id: "D12", title: "Low Power Mode", kind: .hands) { ctx in
             await conditionRun(ctx, setUp: "Turn ON Low Power Mode (Settings, Battery), come back and tap Continue.",
                                restore: "Turn Low Power Mode OFF again, then tap Continue.")
@@ -863,7 +887,7 @@ enum BenchCases {
                 for line in fresh {
                     if let range = line.range(of: "SurfsideAdsKit page: ") {
                         let event = String(line[range.upperBound...])
-                        bench.soak?.pageEvents.append(event)
+                        bench.soak?.pageEvents.append(ISO8601DateFormatter().string(from: Date()) + " " + event)
                         bench.post(.page, "page: " + event)
                         if event.hasPrefix("ready") { reading("after page load") }
                     } else if line.contains("204 - No bids available") {
