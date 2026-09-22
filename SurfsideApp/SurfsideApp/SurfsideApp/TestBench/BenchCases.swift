@@ -802,42 +802,95 @@ enum BenchCases {
 
     // MARK: J. Soak
 
-    /// `-benchSoak <minutes>`: one fetch every 5 seconds.
+    /// `-benchSoak <minutes>`: one fetch every 5 seconds. Every fetch, SDK page event and
+    /// footprint reading goes to the live feed and to `bench-soak-<runId>.json` (written every
+    /// minute), so a run that is cut short still leaves its data. "Stop soak" in the UI ends
+    /// it early with the checks still run.
     static func soak(minutes: Int) -> BenchCase {
         BenchCase(id: "J1", title: "Soak, \(minutes) minutes, one fetch every 5s", kind: .auto, long: true) { ctx in
             let bench = ctx.bench
             let ads = bench.ensureMain()
-            let end = Date().addingTimeInterval(TimeInterval(minutes * 60))
+            let started = Date()
+            let end = started.addingTimeInterval(TimeInterval(minutes * 60))
             let mark = tap.mark()
+            var seen = mark
             var outcomes: [Outcome] = []
             var minute = 0
-            while Date() < end {
+            var lastReading = Date.distantPast
+            var lastSave = Date()
+            bench.stopRequested = false
+            bench.feed = []
+            bench.soak = SoakLog(runId: bench.runId, started: started, minutes: minutes)
+
+            @MainActor func reading(_ why: String) {
+                guard let mib = Bench.footprintMiB() else { return }
+                bench.soak?.readings.append(SoakReading(at: Date(), fetches: outcomes.count, appMiB: mib))
+                bench.post(.memory, String(format: "app %.1f MiB (%@)", mib, why))
+                lastReading = Date()
+            }
+            @MainActor func drainPageLog() {
+                let fresh = tap.since(seen)
+                seen += fresh.count
+                for line in fresh {
+                    if let range = line.range(of: "SurfsideAdsKit page: ") {
+                        let event = String(line[range.upperBound...])
+                        bench.soak?.pageEvents.append(event)
+                        bench.post(.page, "page: " + event)
+                        if event.hasPrefix("ready") { reading("after page load") }
+                    } else if line.contains("204 - No bids available") {
+                        bench.post(.note, "bidder 204, no bids")
+                    }
+                }
+            }
+
+            reading("start")
+            while Date() < end, !bench.stopRequested {
                 let latest = await bench.fetch(ads)
                 outcomes.append(latest)
-                let seconds = Int(Date().timeIntervalSince(end.addingTimeInterval(TimeInterval(-minutes * 60))))
-                let filled = outcomes.filter(\.filled).count
-                let empty = outcomes.filter { $0.succeeded && !$0.filled }.count
-                let reloads = tap.since(mark).filter { $0.contains("page: loading") }.count
-                bench.live = [
-                    String(format: "%d:%02d of %d:00", seconds / 60, seconds % 60, minutes),
-                    "fetches \(outcomes.count): \(filled) filled, \(empty) empty, \(outcomes.count - filled - empty) failed",
-                    "last: \(latest.text)",
-                    "slowest \(outcomes.map(\.ms).max() ?? 0)ms, page loads \(reloads)",
-                ]
-                let elapsed = seconds / 60
+                let n = outcomes.count
+                let kind: FeedLine.Kind = latest.filled ? .filled : (latest.succeeded ? .empty : .failed)
+                let outcome: String
+                switch latest.result {
+                case .none: outcome = "silent"
+                case .success: outcome = latest.filled ? "filled" : "empty"
+                case .failure: outcome = "failed"
+                }
+                let detail: String = { if case .failure(let e)? = latest.result { return "\(e)" } else { return "" } }()
+                bench.soak?.samples.append(SoakSample(n: n, at: Date(), ms: latest.ms, outcome: outcome,
+                                                      count: latest.products.count, detail: detail))
+                bench.post(kind, "#\(n) \(latest.text)")
+                drainPageLog()
+                if Date().timeIntervalSince(lastReading) >= 60 { reading("every minute") }
+                if Date().timeIntervalSince(lastSave) >= 60 { bench.saveSoak(); lastSave = Date() }
+                let elapsed = Int(Date().timeIntervalSince(started)) / 60
                 if elapsed > minute {
                     minute = elapsed
                     NSLog("%@", "BENCH   soak minute \(minute): " + bench.summary(outcomes))
                 }
                 await bench.sleep(5)
+                drainPageLog()
             }
+            if bench.stopRequested {
+                bench.soak?.stoppedEarly = true
+                ctx.note("stopped early by tester after \(Int(Date().timeIntervalSince(started) / 60)) minutes")
+            }
+            reading("end")
+            bench.saveSoak()
             let lines = tap.since(mark)
             ctx.note(bench.summary(outcomes))
             ctx.note("page loads during the soak: \(lines.count(containing: "page: loading")), of which recycles: \(lines.count(containing: "recycle after"))")
+            if let readings = bench.soak?.readings, let first = readings.first, let last = readings.last {
+                ctx.note(String(format: "app footprint %.1f MiB at start, %.1f MiB at end, peak %.1f MiB",
+                                first.appMiB, last.appMiB, readings.map(\.appMiB).max() ?? 0))
+            }
             ctx.expect(outcomes.allSatisfy(\.succeeded), "zero failures")
             let empties = outcomes.filter { $0.succeeded && !$0.filled }.count
             ctx.expect(empties * 50 <= outcomes.count, "genuine no-bids under 2% (\(empties) of \(outcomes.count))")
-            if minutes >= 31 { ctx.expectLog(lines.count(containing: "recycle after") >= 1, "the 30 minute recycle happened") }
+            // At one fetch per 5s the 50-fetch recycle reloads the page every 4 to 5 minutes and
+            // resets its load time, so the 30 minute rule never gets to fire here; D11 covers it.
+            if !bench.stopRequested {
+                ctx.expectLog(lines.count(containing: "recycle after") >= outcomes.count / 50, "a recycle per 50 fetches")
+            }
         }
     }
 }

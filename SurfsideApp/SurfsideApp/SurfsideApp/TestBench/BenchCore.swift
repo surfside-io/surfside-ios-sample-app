@@ -112,6 +112,45 @@ struct BenchReport: Codable {
     var results: [CaseResult]
 }
 
+// MARK: - Soak
+
+/// One fetch of the soak, as written to `Documents/bench-soak-<runId>.json`.
+struct SoakSample: Codable, Identifiable {
+    var id: Int { n }
+    let n: Int
+    let at: Date
+    let ms: Int
+    let outcome: String   // filled, empty, failed, silent
+    let count: Int
+    let detail: String
+}
+
+struct SoakReading: Codable {
+    let at: Date
+    let fetches: Int
+    let appMiB: Double
+}
+
+/// The whole soak so far; saved every minute so an interrupted run still leaves data.
+struct SoakLog: Codable {
+    var runId: String
+    var started: Date
+    var minutes: Int
+    var samples: [SoakSample] = []
+    var pageEvents: [String] = []
+    var readings: [SoakReading] = []
+    var stoppedEarly = false
+}
+
+/// A line of the live feed shown while the soak runs.
+struct FeedLine: Identifiable {
+    enum Kind { case filled, empty, failed, page, memory, note }
+    let id = UUID()
+    let at = Date()
+    let kind: Kind
+    let text: String
+}
+
 // MARK: - Fetch plumbing
 
 struct Outcome {
@@ -244,8 +283,10 @@ final class Bench: ObservableObject {
     @Published var banners: [BannerSlot] = []
     @Published var showSheet = false
     @Published var status = ""
-    /// Live progress lines for a long case (the soak).
-    @Published var live: [String] = []
+    /// The soak in progress (or finished), and its live feed, newest first.
+    @Published var soak: SoakLog?
+    @Published var feed: [FeedLine] = []
+    @Published var stopRequested = false
 
     private var promptContinuation: CheckedContinuation<Bool, Never>?
     private var bannerWaiters: [UUID: (String, Int) -> Void] = [:]
@@ -485,6 +526,37 @@ final class Bench: ObservableObject {
         results[index].verdict = ctx.notes.first == "skipped by tester" ? .skipped : ctx.verdict
         NSLog("%@", "BENCH RESULT \(benchCase.id) \(results[index].verdict.rawValue)")
         save()
+    }
+
+    // MARK: Soak feed and file
+
+    func post(_ kind: FeedLine.Kind, _ text: String) {
+        feed.insert(FeedLine(kind: kind, text: text), at: 0)
+        if feed.count > 400 { feed.removeLast(feed.count - 400) }
+    }
+
+    /// This process's physical footprint. The page's web content process is separate and
+    /// not readable from here; xctrace on the Mac covers that.
+    static func footprintMiB() -> Double? {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return nil }
+        return Double(info.phys_footprint) / 1_048_576
+    }
+
+    func saveSoak() {
+        guard let soak = soak else { return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(soak) else { return }
+        try? data.write(to: Self.resultsURL.deletingLastPathComponent()
+            .appendingPathComponent("bench-soak-\(soak.runId).json"))
     }
 
     // MARK: Results file
