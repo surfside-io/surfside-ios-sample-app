@@ -8,6 +8,7 @@
 import SwiftUI
 import UIKit
 import WebKit
+import SurfsideTracker
 #if DEBUG
 @testable import SurfsideAdsKit
 #else
@@ -29,7 +30,7 @@ private extension Array where Element == String {
 enum BenchCases {
 
     static var all: [BenchCase] { fetchCases + identityCases + trackingCases + lifecycleCases
-        + instanceCases + networkCases + windowCases + bannerCases + buildCases }
+        + instanceCases + networkCases + windowCases + bannerCases + buildCases + orderCases }
 
     private static var tap: LogTap { LogTap.shared }
 
@@ -943,6 +944,60 @@ enum BenchCases {
             ctx.expect(result.event != "NO CALLBACK", "reports an outcome")
             ctx.expect(result.ms < 3000, "does not leave a blank frame for the 8s ceiling")
             _ = await bench.ask("Turn Airplane Mode OFF, then tap Continue.")
+        },
+    ]
+
+    // MARK: K. Tracker order (the warm-up identity question)
+
+    /// The tracker the app's Home tab creates by hand; the bench creates it itself here, once
+    /// per process, so these cases need a fresh launch and K1 must run before K2.
+    private static var trackerCreated = false
+    private static func createTracker() {
+        guard !trackerCreated else { return }
+        trackerCreated = true
+        _ = SurfsideHelper.createTracker(namespace: "iosTracker", environment: .development,
+                                         accountId: "00000-1", sourceId: "00000-2")
+    }
+
+    static let orderCases: [BenchCase] = [
+        BenchCase(id: "K1", title: "Wrong order: SurfsideAds created before the tracker exists", kind: .auto) { ctx in
+            let bench = ctx.bench
+            guard !trackerCreated else { ctx.infoOnly(); ctx.note("tracker already exists in this process; run K1 first"); return }
+            let mark = tap.mark()
+            let ads = SurfsideAds(configuration: bench.config())
+            await bench.sleep(2.0)
+            let warm = tap.since(mark).filter { $0.contains("page: loading") }
+            ctx.note("warm-up: " + warm.map { String($0.suffix(70)) }.joined(separator: " | "))
+            ctx.expectLog(warm.count == 1 && warm[0].contains("identity anonymous"), "warm-up loaded anonymous (no tracker yet)")
+            createTracker()
+            let mark2 = tap.mark()
+            let first = await bench.fetch(ads), second = await bench.fetch(ads)
+            let lines = tap.since(mark2)
+            let reloads = lines.count(containing: "identity changed")
+            let users = Set(LogTap.initUsers(lines, account: Bench.account))
+            ctx.note("first \(first.text), second \(second.text); reloads \(reloads); web SDK initialised with \(users.sorted())")
+            ctx.expect(first.filled && second.filled, "both filled")
+            ctx.expectLog(reloads == 1, "exactly one identity reload (the cost of the wrong order)")
+            ctx.expectLog(users.count == 1 && users.first != "", "fetches carried the tracker's id")
+        },
+        BenchCase(id: "K2", title: "Normal order: tracker first, then SurfsideAds; warm-up carries the id, no reload", kind: .auto) { ctx in
+            let bench = ctx.bench
+            createTracker()
+            let mark = tap.mark()
+            let ads = SurfsideAds(configuration: bench.config())
+            await bench.sleep(2.0)
+            let warm = tap.since(mark).filter { $0.contains("page: loading") }
+            ctx.note("warm-up: " + warm.map { String($0.suffix(70)) }.joined(separator: " | "))
+            ctx.expectLog(warm.count == 1 && warm[0].contains("identity set"), "warm-up loaded with the tracker's id")
+            let mark2 = tap.mark()
+            let first = await bench.fetch(ads), second = await bench.fetch(ads)
+            let lines = tap.since(mark2)
+            let users = Set(LogTap.initUsers(lines, account: Bench.account))
+            ctx.note("first \(first.text), second \(second.text); web SDK initialised with \(users.sorted())")
+            ctx.expect(first.filled && second.filled, "both filled")
+            ctx.expect(first.ms < 1000, "first fetch served from the warm page (under 1s)")
+            ctx.expectLog(lines.filter { !$0.contains("BENCH") }.count(containing: "page: loading") == 0, "no reload at the first fetch")
+            ctx.expectLog(users.count == 1 && users.first != "", "fetches carried the tracker's id")
         },
     ]
 
