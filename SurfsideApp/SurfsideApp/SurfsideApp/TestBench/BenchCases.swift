@@ -754,6 +754,113 @@ enum BenchCases {
             ctx.expect(outcomes.allSatisfy(\.succeeded), "none failed while resizing")
             ctx.expectFilled(outcomes, "all filled")
         },
+        // Programmatic forms of G6 and G5 for a simulator with nobody at the screen. The scene
+        // requests are the calls the system makes for the Dock and the app switcher: opening a
+        // second scene beside the hosting one puts both in Split View (a real resize of the
+        // hosting window), closing it gives the width back. A divider drag has no API, and an
+        // iPad app that supports multitasking may not request an orientation.
+        BenchCase(id: "G6a", title: "iPad: Split View opened and closed beside the page under fetches", kind: .auto) { ctx in
+            let bench = ctx.bench
+            let app = UIApplication.shared
+            guard UIDevice.current.userInterfaceIdiom == .pad, app.supportsMultipleScenes else {
+                ctx.infoOnly(); ctx.note("needs an iPad with multiple scenes"); return
+            }
+            let ads = bench.ensureMain()
+            _ = await bench.fetch(ads)
+            guard let hosting = Bench.hiddenPages().first?.window?.windowScene else {
+                ctx.expect(false, "found the scene hosting the page"); return
+            }
+            let known = Set(app.connectedScenes.map { ObjectIdentifier($0) })
+            var sizes: [String] = []
+            func record() {
+                let b = hosting.coordinateSpace.bounds
+                let s = "\(Int(b.width))x\(Int(b.height))"
+                if sizes.last != s { sizes.append(s) }
+            }
+            record()
+            var second: UIWindowScene?
+            let outcomes = await bench.burst(ads, count: 20, spacing: 0.5) { i in
+                record()
+                if i == 2 {
+                    let options = UIScene.ActivationRequestOptions()
+                    options.requestingScene = hosting
+                    app.requestSceneSessionActivation(nil, userActivity: nil, options: options) { ctx.note("activation error: \($0)") }
+                }
+                if i == 12 {
+                    second = app.connectedScenes.compactMap { $0 as? UIWindowScene }.first { !known.contains(ObjectIdentifier($0)) }
+                    if let second {
+                        app.requestSceneSessionDestruction(second.session, options: nil) { ctx.note("destruction error: \($0)") }
+                    }
+                }
+            }
+            await bench.sleep(1.0)
+            record()
+            ctx.note("hosting window sizes seen: " + sizes.joined(separator: " > "))
+            ctx.note(bench.summary(outcomes))
+            ctx.expect(second != nil, "a second scene opened beside the page")
+            ctx.expect(sizes.count >= 3, "the hosting window shrank and grew back")
+            ctx.expect(outcomes.allSatisfy(\.succeeded), "none failed while the window resized")
+            ctx.expectFilled(outcomes, "all filled")
+            ctx.expect(Bench.hiddenPages().first?.window?.windowScene === hosting, "the page is still hosted in its scene")
+            if let second { ctx.expect(!app.connectedScenes.contains(second), "the second scene is gone again") }
+        },
+        BenchCase(id: "G5a", title: "iPad: second scene opened, scene hosting the page destroyed", kind: .auto) { ctx in
+            let bench = ctx.bench
+            let app = UIApplication.shared
+            guard UIDevice.current.userInterfaceIdiom == .pad, app.supportsMultipleScenes else {
+                ctx.infoOnly(); ctx.note("needs an iPad with multiple scenes"); return
+            }
+            let ads = bench.ensureMain()
+            let warm = await bench.fetch(ads)
+            ctx.note("page warmed: " + warm.text)
+            guard let page = Bench.hiddenPages().first, let hosting = page.window?.windowScene else {
+                ctx.expect(false, "found the scene hosting the page"); return
+            }
+            weak var orphan: WKWebView? = page
+            let known = Set(app.connectedScenes.map { ObjectIdentifier($0) })
+            let options = UIScene.ActivationRequestOptions()
+            options.requestingScene = hosting
+            app.requestSceneSessionActivation(nil, userActivity: nil, options: options) { ctx.note("activation error: \($0)") }
+            var second: UIWindowScene?
+            for _ in 0..<40 {
+                await bench.sleep(0.25)
+                second = app.connectedScenes.compactMap { $0 as? UIWindowScene }
+                    .first { !known.contains(ObjectIdentifier($0)) && $0.activationState == .foregroundActive }
+                if second != nil { break }
+            }
+            guard let second else { ctx.expect(false, "a second scene became foreground active"); return }
+            ctx.note("second scene at \(Int(second.coordinateSpace.bounds.width))x\(Int(second.coordinateSpace.bounds.height)), "
+                     + "hosting scene at \(Int(hosting.coordinateSpace.bounds.width))x\(Int(hosting.coordinateSpace.bounds.height))")
+            app.requestSceneSessionDestruction(hosting.session, options: nil) { ctx.note("destruction error: \($0)") }
+            for _ in 0..<40 {
+                await bench.sleep(0.25)
+                if !app.connectedScenes.contains(hosting) { break }
+            }
+            ctx.expect(!app.connectedScenes.contains(hosting), "the hosting scene disconnected")
+            @MainActor func orphanState(_ when: String) {
+                guard let orphan else { ctx.note("\(when): the old page's WebView is gone"); return }
+                let window = orphan.window
+                let scene = window?.windowScene
+                ctx.note("\(when): old WebView window \(window == nil ? "nil" : "alive"), its scene "
+                         + (scene.map { "\($0 === hosting ? "the dead one" : "another"), state \($0.activationState.rawValue)" } ?? "nil")
+                         + ", connected scenes \(app.connectedScenes.count), hidden pages in them \(Bench.hiddenPages().count)")
+            }
+            orphanState("after the scene went")
+            let mark = tap.mark()
+            let outcomes = await bench.burst(ads, count: 5, spacing: 0.5)
+            ctx.note(bench.summary(outcomes))
+            ctx.expect(outcomes.allSatisfy(\.succeeded), "none failed")
+            ctx.expectFilled(outcomes, "all filled in the surviving scene")
+            ctx.expectLog(tap.since(mark).count(containing: "host window went away,") == 1, "rebuilt once after the window went away")
+            ctx.expect(Bench.hiddenPages().first?.window?.windowScene === second, "the page now lives in the surviving scene")
+            orphanState("after the burst")
+            await bench.sleep(10)
+            orphanState("10s later")
+            let late = await bench.fetch(ads)
+            ctx.note("fetch 10s later: " + late.text)
+            orphanState("after that fetch")
+            ctx.note("page log since the scene went: " + tap.since(mark).filter { $0.contains("page:") }.map { String($0.suffix(80)) }.joined(separator: " | "))
+        },
     ]
 
     // MARK: H. Banners
