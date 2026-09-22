@@ -703,6 +703,33 @@ enum BenchCases {
         BenchCase(id: "G4", title: "Rotation", kind: .hands) { ctx in
             await conditionRun(ctx, setUp: "Tap Continue, then rotate the phone back and forth for 5 seconds (rotation lock off).", restore: nil)
         },
+        BenchCase(id: "G5", title: "iPad: second window, close the one hosting the page", kind: .hands) { ctx in
+            let bench = ctx.bench
+            let ads = bench.ensureMain()
+            let warm = await bench.fetch(ads)
+            ctx.note("page warmed in this window: " + warm.text)
+            guard await bench.ask("iPad only. Open a second window of this app (long-press the Dock icon, Show All Windows, +, or drag the icon to the side), then close THIS window from the app switcher. In the surviving window, open Test Bench and tap Continue.") else {
+                ctx.note("skipped by tester"); return
+            }
+            let mark = tap.mark()
+            let outcomes = await bench.burst(ads, count: 5, spacing: 0.5)
+            ctx.note(bench.summary(outcomes))
+            ctx.expect(outcomes.allSatisfy(\.succeeded), "none failed")
+            ctx.expectFilled(outcomes, "all filled in the surviving window")
+            ctx.note("page log since Continue: " + tap.since(mark).filter { $0.contains("page:") }.map { String($0.suffix(80)) }.joined(separator: " | "))
+        },
+        BenchCase(id: "G6", title: "iPad: Split View resize and Stage Manager", kind: .hands) { ctx in
+            let bench = ctx.bench
+            let ads = bench.ensureMain()
+            _ = await bench.fetch(ads)
+            guard await bench.ask("iPad only. Tap Continue, then for about 10 seconds resize the window (Split View divider or Stage Manager corner drag), and switch between windows if Stage Manager is on.") else {
+                ctx.note("skipped by tester"); return
+            }
+            let outcomes = await bench.burst(ads, count: 20, spacing: 0.5)
+            ctx.note(bench.summary(outcomes))
+            ctx.expect(outcomes.allSatisfy(\.succeeded), "none failed while resizing")
+            ctx.expectFilled(outcomes, "all filled")
+        },
     ]
 
     // MARK: H. Banners
@@ -802,12 +829,14 @@ enum BenchCases {
 
     // MARK: J. Soak
 
-    /// `-benchSoak <minutes>`: one fetch every 5 seconds. Every fetch, SDK page event and
-    /// footprint reading goes to the live feed and to `bench-soak-<runId>.json` (written every
-    /// minute), so a run that is cut short still leaves its data. "Stop soak" in the UI ends
-    /// it early with the checks still run.
-    static func soak(minutes: Int) -> BenchCase {
-        BenchCase(id: "J1", title: "Soak, \(minutes) minutes, one fetch every 5s", kind: .auto, long: true) { ctx in
+    /// `-benchSoak <minutes>`: one fetch every `-benchSoakEvery` seconds (default 5). Every
+    /// fetch, SDK page event and footprint reading goes to the live feed and to
+    /// `bench-soak-<runId>.json` (written every minute), so a run that is cut short still
+    /// leaves its data. "Stop soak" in the UI ends it early with the checks still run.
+    /// With fewer than 50 fetches in 30 minutes (`-benchSoakEvery 60`) the run exercises the
+    /// 30 minute recycle rule instead of the count rule (D11).
+    static func soak(minutes: Int, every spacing: TimeInterval = 5) -> BenchCase {
+        BenchCase(id: "J1", title: "Soak, \(minutes) minutes, one fetch every \(Int(spacing))s", kind: .auto, long: true) { ctx in
             let bench = ctx.bench
             let ads = bench.ensureMain()
             let started = Date()
@@ -867,7 +896,7 @@ enum BenchCases {
                     minute = elapsed
                     NSLog("%@", "BENCH   soak minute \(minute): " + bench.summary(outcomes))
                 }
-                await bench.sleep(5)
+                await bench.sleep(spacing)
                 drainPageLog()
             }
             if bench.stopRequested {
@@ -886,10 +915,18 @@ enum BenchCases {
             ctx.expect(outcomes.allSatisfy(\.succeeded), "zero failures")
             let empties = outcomes.filter { $0.succeeded && !$0.filled }.count
             ctx.expect(empties * 50 <= outcomes.count, "genuine no-bids under 2% (\(empties) of \(outcomes.count))")
-            // At one fetch per 5s the 50-fetch recycle reloads the page every 4 to 5 minutes and
-            // resets its load time, so the 30 minute rule never gets to fire here; D11 covers it.
-            if !bench.stopRequested {
-                ctx.expectLog(lines.count(containing: "recycle after") >= outcomes.count / 50, "a recycle per 50 fetches")
+            // The 50-fetch recycle resets the page's load time, so the 30 minute rule can only
+            // fire in a run with fewer than 50 fetches per 30 minutes.
+            let recycles = lines.filter { $0.contains("recycle after") }
+            let fetchesPerHalfHour = Int(1800 / spacing)
+            if !bench.stopRequested, fetchesPerHalfHour < 50, minutes >= 31 {
+                let byTime = recycles.contains { line in
+                    guard let range = line.range(of: "recycle after ") else { return false }
+                    return (Int(line[range.upperBound...].prefix { $0.isNumber }) ?? 50) < 50
+                }
+                ctx.expectLog(byTime, "the 30 minute recycle happened (a recycle logged with under 50 fetches)")
+            } else if !bench.stopRequested {
+                ctx.expectLog(recycles.count >= outcomes.count / 50, "a recycle per 50 fetches")
             }
         }
     }

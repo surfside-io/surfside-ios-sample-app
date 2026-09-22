@@ -8,6 +8,7 @@
 //    -benchOnly A1,D7       restrict any run to these case ids
 //    -benchCreate init|appear|lazy   where the long-lived SurfsideAds is created
 //    -benchSoak 45          run the soak for that many minutes
+//    -benchSoakEvery 60     seconds between soak fetches (default 5; 60 exercises the 30 minute recycle)
 //  Results: Documents/bench-results.json (and bench-results-<runId>.json); the soak also
 //  writes Documents/bench-soak-<runId>.json every minute.
 //
@@ -58,7 +59,9 @@ struct BenchView: View {
         bench.reset(BenchCases.all)
         let args = ProcessInfo.processInfo.arguments
         if let i = args.firstIndex(of: "-benchSoak"), args.indices.contains(i + 1), let minutes = Int(args[i + 1]) {
-            let soak = BenchCases.soak(minutes: minutes)
+            var every: TimeInterval = 5
+            if let j = args.firstIndex(of: "-benchSoakEvery"), args.indices.contains(j + 1), let s = Double(args[j + 1]) { every = s }
+            let soak = BenchCases.soak(minutes: minutes, every: every)
             bench.reset([soak])
             Task { await bench.run([soak]) }
         } else if args.contains("-benchAuto") {
