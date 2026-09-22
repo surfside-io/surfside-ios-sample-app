@@ -56,6 +56,18 @@ struct MainTabView: View {
                 }
             }
 
+            if #available(iOS 16.0, *) {
+                NavigationView {
+                    BenchView()
+                }
+                .navigationViewStyle(.stack)
+                .tag(4)
+                .tabItem {
+                    Image(systemName: "checklist")
+                    Text("Test Bench")
+                }
+            }
+
         }
     }
 }
